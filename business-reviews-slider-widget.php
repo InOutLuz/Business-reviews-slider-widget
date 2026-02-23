@@ -1,0 +1,2246 @@
+<?php
+/**
+ * Plugin Name: Business Reviews Slider Widget
+ * Description: Fetch and display Google and Trustpilot reviews with a customizable slider widget.
+ * Version: 1.0.0
+ * Author: Dope Studio
+ * Author URI: https://profiles.wordpress.org/dopestudio
+ * License: GPL-2.0+
+ * Text Domain: business-reviews-slider-widget
+ * Domain Path: /languages
+ */
+
+if (! defined('ABSPATH')) {
+    exit;
+}
+
+class BRSW_Business_Reviews_Slider_Widget
+{
+    private const SETTINGS_OPTION = 'brsw_settings';
+    private const CACHE_OPTION = 'brsw_reviews_cache';
+    private const TRUSTPILOT_CACHE_OPTION = 'brsw_trustpilot_reviews_cache';
+    private const AJAX_ACTION = 'brsw_fetch_reviews';
+    private const CRON_HOOK = 'brsw_cron_fetch_reviews';
+
+    public function __construct()
+    {
+        add_action('admin_menu', [$this, 'register_admin_page']);
+        add_action('admin_init', [$this, 'register_settings']);
+        add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
+        add_action('init', [$this, 'ensure_cron_schedule']);
+
+        add_action('wp_enqueue_scripts', [$this, 'register_frontend_assets']);
+
+        add_action('wp_ajax_' . self::AJAX_ACTION, [$this, 'ajax_fetch_reviews']);
+        add_action(self::CRON_HOOK, [$this, 'run_scheduled_fetch']);
+        add_action('update_option_' . self::SETTINGS_OPTION, [$this, 'on_settings_updated'], 10, 2);
+        add_filter('cron_schedules', [$this, 'register_cron_schedules']);
+
+        add_shortcode('google_reviews_slider', [$this, 'render_shortcode']);
+        add_shortcode('trustpilot_reviews_slider', [$this, 'render_trustpilot_shortcode']);
+    }
+
+    public static function deactivate(): void
+    {
+        wp_clear_scheduled_hook(self::CRON_HOOK);
+    }
+
+    public function register_admin_page(): void
+    {
+        add_menu_page(
+            __('Business Reviews Slider Widget', 'business-reviews-slider-widget'),
+            __('Business Reviews Slider Widget', 'business-reviews-slider-widget'),
+            'manage_options',
+            'brsw-business-reviews-slider-widget',
+            [$this, 'render_admin_page'],
+            'dashicons-star-filled',
+            58
+        );
+    }
+
+    public function register_settings(): void
+    {
+        register_setting('brsw_settings_group', self::SETTINGS_OPTION, [
+            'sanitize_callback' => [$this, 'sanitize_settings'],
+            'default'           => [
+                'token'       => '',
+                'enable_google' => 1,
+                'enable_trustpilot' => 0,
+                'place_id'    => '',
+                'place_url'   => '',
+                'google_places_api_key' => '',
+                'use_places_api_summary' => 0,
+                'max_reviews' => 0,
+                'trustpilot_domain' => '',
+                'trustpilot_max_reviews' => 0,
+                'language'    => 'en',
+                'theme'       => 'dark',
+                'show_no_comment' => 1,
+                'autoplay_default' => 1,
+                'autoplay_interval_default' => 5500,
+                'cron_enabled' => 0,
+                'cron_frequency' => 'weekly',
+                'cron_time' => '03:00',
+                'cron_fetch_scope' => 'enabled',
+                'loop_infinite_default' => 0,
+                'show_dots_default' => 1,
+                'swipe_default' => 1,
+                'slides_mobile_default' => 1,
+                'slides_tablet_default' => 2,
+                'slides_desktop_default' => 3,
+                'display_limit_default' => 0,
+                'show_summary_default' => 1,
+                'show_read_on_google_default' => 1,
+                'trustpilot_theme' => 'dark',
+                'trustpilot_logo_variant' => 'white',
+                'trustpilot_autoplay_default' => 1,
+                'trustpilot_autoplay_interval_default' => 5500,
+                'trustpilot_loop_infinite_default' => 0,
+                'trustpilot_show_dots_default' => 1,
+                'trustpilot_swipe_default' => 1,
+                'trustpilot_slides_mobile_default' => 1,
+                'trustpilot_slides_tablet_default' => 2,
+                'trustpilot_slides_desktop_default' => 3,
+                'trustpilot_display_limit_default' => 0,
+                'trustpilot_show_summary_default' => 1,
+                'trustpilot_show_titles_default' => 1,
+                'trustpilot_show_no_comment_default' => 1,
+                'trustpilot_min_rating_default' => 0,
+                'trustpilot_rating_mode_default' => 'auto',
+                'trustpilot_manual_rating_default' => 5,
+                'trustpilot_review_count_mode' => 'fetched',
+                'trustpilot_custom_review_count' => 0,
+                'trustpilot_title_default' => 'Latest Trustpilot reviews',
+                'rating_mode_default' => 'auto',
+                'manual_rating_default' => 5,
+                'min_rating_default' => 0,
+                'review_count_mode' => 'fetched',
+                'custom_review_count' => 0,
+            ],
+        ]);
+    }
+
+    public function sanitize_settings(array $input): array
+    {
+        $output = [];
+
+        $output['token'] = isset($input['token']) ? sanitize_text_field($input['token']) : '';
+        $output['enable_google'] = isset($input['enable_google']) ? 1 : 0;
+        $output['enable_trustpilot'] = isset($input['enable_trustpilot']) ? 1 : 0;
+        $output['place_id'] = isset($input['place_id']) ? sanitize_text_field($input['place_id']) : '';
+        $output['place_url'] = isset($input['place_url']) ? esc_url_raw($input['place_url']) : '';
+        $output['google_places_api_key'] = isset($input['google_places_api_key']) ? sanitize_text_field($input['google_places_api_key']) : '';
+        $output['use_places_api_summary'] = isset($input['use_places_api_summary']) ? 1 : 0;
+
+        $maxReviewsRaw = isset($input['max_reviews']) ? trim((string) $input['max_reviews']) : '';
+        if ($maxReviewsRaw === '') {
+            $output['max_reviews'] = 0;
+        } else {
+            $output['max_reviews'] = max(1, min(500, absint($maxReviewsRaw)));
+        }
+
+        $trustpilotMaxRaw = isset($input['trustpilot_max_reviews']) ? trim((string) $input['trustpilot_max_reviews']) : '';
+        if ($trustpilotMaxRaw === '') {
+            $output['trustpilot_max_reviews'] = 0;
+        } else {
+            $output['trustpilot_max_reviews'] = max(1, min(500, absint($trustpilotMaxRaw)));
+        }
+
+        $output['trustpilot_domain'] = isset($input['trustpilot_domain']) ? sanitize_text_field($input['trustpilot_domain']) : '';
+
+        $output['language'] = isset($input['language']) ? sanitize_text_field($input['language']) : 'en';
+        $output['show_no_comment'] = isset($input['show_no_comment']) ? 1 : 0;
+        $output['autoplay_default'] = isset($input['autoplay_default']) ? 1 : 0;
+        $output['autoplay_interval_default'] = isset($input['autoplay_interval_default']) ? max(1500, min(20000, absint($input['autoplay_interval_default']))) : 5500;
+        $output['cron_enabled'] = isset($input['cron_enabled']) ? 1 : 0;
+
+        $cronFrequency = isset($input['cron_frequency']) ? sanitize_key($input['cron_frequency']) : 'weekly';
+        $output['cron_frequency'] = in_array($cronFrequency, ['twicedaily', 'daily', 'weekly', 'grs_every_2_days', 'grs_monthly'], true) ? $cronFrequency : 'weekly';
+
+        $cronTime = isset($input['cron_time']) ? trim((string) $input['cron_time']) : '03:00';
+        if (! preg_match('/^([01]\d|2[0-3]):([0-5]\d)$/', $cronTime)) {
+            $cronTime = '03:00';
+        }
+        $output['cron_time'] = $cronTime;
+
+        $cronFetchScope = isset($input['cron_fetch_scope']) ? sanitize_key((string) $input['cron_fetch_scope']) : 'enabled';
+        $output['cron_fetch_scope'] = in_array($cronFetchScope, ['enabled', 'all', 'google', 'trustpilot'], true) ? $cronFetchScope : 'enabled';
+
+        $output['loop_infinite_default'] = isset($input['loop_infinite_default']) ? 1 : 0;
+        $output['show_dots_default'] = isset($input['show_dots_default']) ? 1 : 0;
+        $output['swipe_default'] = isset($input['swipe_default']) ? 1 : 0;
+        $output['show_summary_default'] = isset($input['show_summary_default']) ? 1 : 0;
+        $output['show_read_on_google_default'] = isset($input['show_read_on_google_default']) ? 1 : 0;
+        $output['trustpilot_show_summary_default'] = isset($input['trustpilot_show_summary_default']) ? 1 : 0;
+        $output['trustpilot_show_titles_default'] = isset($input['trustpilot_show_titles_default']) ? 1 : 0;
+        $output['trustpilot_show_no_comment_default'] = isset($input['trustpilot_show_no_comment_default']) ? 1 : 0;
+
+        $output['slides_mobile_default'] = isset($input['slides_mobile_default']) ? max(1, min(6, absint($input['slides_mobile_default']))) : 1;
+        $output['slides_tablet_default'] = isset($input['slides_tablet_default']) ? max(1, min(6, absint($input['slides_tablet_default']))) : 2;
+        $output['slides_desktop_default'] = isset($input['slides_desktop_default']) ? max(1, min(6, absint($input['slides_desktop_default']))) : 3;
+
+        $displayLimitRaw = isset($input['display_limit_default']) ? trim((string) $input['display_limit_default']) : '';
+        if ($displayLimitRaw === '') {
+            $output['display_limit_default'] = 0;
+        } else {
+            $output['display_limit_default'] = max(6, min(500, absint($displayLimitRaw)));
+        }
+
+        $tpDisplayLimitRaw = isset($input['trustpilot_display_limit_default']) ? trim((string) $input['trustpilot_display_limit_default']) : '';
+        if ($tpDisplayLimitRaw === '') {
+            $output['trustpilot_display_limit_default'] = 0;
+        } else {
+            $output['trustpilot_display_limit_default'] = max(1, min(500, absint($tpDisplayLimitRaw)));
+        }
+
+        $tpMinRating = isset($input['trustpilot_min_rating_default']) ? absint($input['trustpilot_min_rating_default']) : 0;
+        $output['trustpilot_min_rating_default'] = in_array($tpMinRating, [0, 2, 3, 4, 5], true) ? $tpMinRating : 0;
+
+        $tpRatingMode = isset($input['trustpilot_rating_mode_default']) ? sanitize_key($input['trustpilot_rating_mode_default']) : 'auto';
+        $output['trustpilot_rating_mode_default'] = in_array($tpRatingMode, ['auto', 'manual'], true) ? $tpRatingMode : 'auto';
+        $output['trustpilot_manual_rating_default'] = isset($input['trustpilot_manual_rating_default']) ? max(0, min(5, (float) $input['trustpilot_manual_rating_default'])) : 5;
+
+        $tpReviewCountMode = isset($input['trustpilot_review_count_mode']) ? sanitize_key($input['trustpilot_review_count_mode']) : 'fetched';
+        $output['trustpilot_review_count_mode'] = in_array($tpReviewCountMode, ['fetched', 'custom'], true) ? $tpReviewCountMode : 'fetched';
+        $output['trustpilot_custom_review_count'] = isset($input['trustpilot_custom_review_count']) ? max(0, absint($input['trustpilot_custom_review_count'])) : 0;
+
+        $tpTheme = isset($input['trustpilot_theme']) ? sanitize_key($input['trustpilot_theme']) : 'dark';
+        $output['trustpilot_theme'] = in_array($tpTheme, ['dark', 'light'], true) ? $tpTheme : 'dark';
+        $tpLogoVariant = isset($input['trustpilot_logo_variant']) ? sanitize_key($input['trustpilot_logo_variant']) : 'white';
+        $output['trustpilot_logo_variant'] = in_array($tpLogoVariant, ['white', 'black'], true) ? $tpLogoVariant : 'white';
+        $output['trustpilot_autoplay_default'] = isset($input['trustpilot_autoplay_default']) ? 1 : 0;
+        $output['trustpilot_autoplay_interval_default'] = isset($input['trustpilot_autoplay_interval_default']) ? max(1500, min(20000, absint($input['trustpilot_autoplay_interval_default']))) : 5500;
+        $output['trustpilot_loop_infinite_default'] = isset($input['trustpilot_loop_infinite_default']) ? 1 : 0;
+        $output['trustpilot_show_dots_default'] = isset($input['trustpilot_show_dots_default']) ? 1 : 0;
+        $output['trustpilot_swipe_default'] = isset($input['trustpilot_swipe_default']) ? 1 : 0;
+        $output['trustpilot_slides_mobile_default'] = isset($input['trustpilot_slides_mobile_default']) ? max(1, min(6, absint($input['trustpilot_slides_mobile_default']))) : 1;
+        $output['trustpilot_slides_tablet_default'] = isset($input['trustpilot_slides_tablet_default']) ? max(1, min(6, absint($input['trustpilot_slides_tablet_default']))) : 2;
+        $output['trustpilot_slides_desktop_default'] = isset($input['trustpilot_slides_desktop_default']) ? max(1, min(6, absint($input['trustpilot_slides_desktop_default']))) : 3;
+        $output['trustpilot_title_default'] = isset($input['trustpilot_title_default']) ? sanitize_text_field((string) $input['trustpilot_title_default']) : 'Latest Trustpilot reviews';
+
+        $ratingMode = isset($input['rating_mode_default']) ? sanitize_key($input['rating_mode_default']) : 'auto';
+        $output['rating_mode_default'] = in_array($ratingMode, ['auto', 'manual'], true) ? $ratingMode : 'auto';
+        $output['manual_rating_default'] = isset($input['manual_rating_default']) ? max(0, min(5, (float) $input['manual_rating_default'])) : 5;
+
+        $minRating = isset($input['min_rating_default']) ? absint($input['min_rating_default']) : 0;
+        $output['min_rating_default'] = in_array($minRating, [0, 2, 3, 4, 5], true) ? $minRating : 0;
+
+        $reviewCountMode = isset($input['review_count_mode']) ? sanitize_key($input['review_count_mode']) : 'fetched';
+        $output['review_count_mode'] = in_array($reviewCountMode, ['fetched', 'custom'], true) ? $reviewCountMode : 'fetched';
+        $output['custom_review_count'] = isset($input['custom_review_count']) ? max(0, absint($input['custom_review_count'])) : 0;
+
+        $theme = isset($input['theme']) ? sanitize_key($input['theme']) : 'dark';
+        $output['theme'] = in_array($theme, ['dark', 'light'], true) ? $theme : 'dark';
+
+        return $output;
+    }
+
+    public function enqueue_admin_assets(string $hook): void
+    {
+        if ($hook !== 'toplevel_page_brsw-business-reviews-slider-widget') {
+            return;
+        }
+
+        wp_enqueue_style(
+            'brsw-admin-style',
+            plugin_dir_url(__FILE__) . 'assets/admin.css',
+            [],
+            '1.0.0'
+        );
+
+        wp_enqueue_script(
+            'brsw-admin-script',
+            plugin_dir_url(__FILE__) . 'assets/admin.js',
+            [],
+            '1.0.0',
+            true
+        );
+
+        wp_localize_script('brsw-admin-script', 'brswAdmin', [
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+            'nonce'   => wp_create_nonce(self::AJAX_ACTION),
+            'action'  => self::AJAX_ACTION,
+        ]);
+    }
+
+    public function register_frontend_assets(): void
+    {
+        wp_register_style(
+            'brsw-frontend-style',
+            plugin_dir_url(__FILE__) . 'assets/frontend.css',
+            [],
+            '1.0.0'
+        );
+
+        wp_register_script(
+            'brsw-frontend-script',
+            plugin_dir_url(__FILE__) . 'assets/frontend.js',
+            [],
+            '1.0.0',
+            true
+        );
+    }
+
+    public function render_admin_page(): void
+    {
+        if (! current_user_can('manage_options')) {
+            return;
+        }
+
+        $settings = get_option(self::SETTINGS_OPTION, []);
+        $cache = get_option(self::CACHE_OPTION, []);
+        $tpCache = get_option(self::TRUSTPILOT_CACHE_OPTION, []);
+        $googleCount = isset($cache['reviews']) && is_array($cache['reviews']) ? count($cache['reviews']) : 0;
+        $trustpilotCount = isset($tpCache['reviews']) && is_array($tpCache['reviews']) ? count($tpCache['reviews']) : 0;
+        $count = $googleCount + $trustpilotCount;
+        $updatedGoogle = isset($cache['updated_at']) ? (int) $cache['updated_at'] : 0;
+        $updatedTrustpilot = isset($tpCache['updated_at']) ? (int) $tpCache['updated_at'] : 0;
+        $updated = max($updatedGoogle, $updatedTrustpilot);
+        $nextCronTs = wp_next_scheduled(self::CRON_HOOK);
+        $activeTabNonce = sanitize_text_field((string) filter_input(INPUT_GET, '_wpnonce', FILTER_UNSAFE_RAW));
+        $activeTab = sanitize_key((string) filter_input(INPUT_GET, 'tab', FILTER_UNSAFE_RAW));
+        if ($activeTab === '') {
+            $activeTab = 'general';
+        }
+        if ($activeTab !== 'general' && ! wp_verify_nonce($activeTabNonce, 'brsw_admin_tab')) {
+            $activeTab = 'general';
+        }
+        if (! in_array($activeTab, ['general', 'google', 'trustpilot'], true)) {
+            $activeTab = 'general';
+        }
+        $rowStyleGeneral = $activeTab === 'general' ? '' : 'display:none;';
+        $rowStyleGoogle = $activeTab === 'google' ? '' : 'display:none;';
+        $rowStyleTrustpilot = $activeTab === 'trustpilot' ? '' : 'display:none;';
+        $tabGeneralUrl = wp_nonce_url(add_query_arg([
+            'page' => 'brsw-business-reviews-slider-widget',
+            'tab'  => 'general',
+        ], admin_url('admin.php')), 'brsw_admin_tab');
+        $tabGoogleUrl = wp_nonce_url(add_query_arg([
+            'page' => 'brsw-business-reviews-slider-widget',
+            'tab'  => 'google',
+        ], admin_url('admin.php')), 'brsw_admin_tab');
+        $tabTrustpilotUrl = wp_nonce_url(add_query_arg([
+            'page' => 'brsw-business-reviews-slider-widget',
+            'tab'  => 'trustpilot',
+        ], admin_url('admin.php')), 'brsw_admin_tab');
+        ?>
+        <div class="wrap grs-wrap">
+            <h1><?php esc_html_e('Business Reviews Slider Widget', 'business-reviews-slider-widget'); ?></h1>
+            <p><?php esc_html_e('Fetch reviews, and use shortcode on the frontend.', 'business-reviews-slider-widget'); ?></p>
+
+            <div class="grs-cards">
+                <div class="grs-card">
+                    <h2><?php esc_html_e('Settings', 'business-reviews-slider-widget'); ?></h2>
+                    <nav class="nav-tab-wrapper" style="margin-bottom: 14px;">
+                        <a href="<?php echo esc_url($tabGeneralUrl); ?>" class="nav-tab <?php echo $activeTab === 'general' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('General settings', 'business-reviews-slider-widget'); ?></a>
+                        <a href="<?php echo esc_url($tabGoogleUrl); ?>" class="nav-tab <?php echo $activeTab === 'google' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Google settings', 'business-reviews-slider-widget'); ?></a>
+                        <a href="<?php echo esc_url($tabTrustpilotUrl); ?>" class="nav-tab <?php echo $activeTab === 'trustpilot' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Trustpilot settings', 'business-reviews-slider-widget'); ?></a>
+                    </nav>
+                    <form method="post" action="options.php" id="grs-settings-form">
+                        <?php settings_fields('brsw_settings_group'); ?>
+                        <table class="form-table" role="presentation">
+                            <tbody>
+                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                                    <th scope="row">
+                                        <label for="grs_token"><?php esc_html_e('Apify token', 'business-reviews-slider-widget'); ?></label>
+                                        <details class="grs-help-inline">
+                                            <summary aria-label="<?php esc_attr_e('How to get Apify token', 'business-reviews-slider-widget'); ?>">?</summary>
+                                            <div class="grs-help-content">
+                                                <strong><?php esc_html_e('How to get it:', 'business-reviews-slider-widget'); ?></strong>
+                                                <ol>
+                                                    <li><?php esc_html_e('Log in to Apify.', 'business-reviews-slider-widget'); ?></li>
+                                                    <li><?php esc_html_e('Open Settings → Integrations/API.', 'business-reviews-slider-widget'); ?></li>
+                                                    <li><?php esc_html_e('Create/copy your API token and paste it here.', 'business-reviews-slider-widget'); ?></li>
+                                                </ol>
+                                            </div>
+                                        </details>
+                                    </th>
+                                    <td>
+                                        <input id="grs_token" type="password" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[token]" class="regular-text" value="<?php echo esc_attr($settings['token'] ?? ''); ?>" placeholder="apify_api_..." />
+                                        <p class="description"><?php esc_html_e('Apify API is used to fetch the reviews. It has a pretty generous free tier 1000 reviews+. Just register an account, create/copy your API token, and paste it here.', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Platforms to enable', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_enable_google" style="display:block; margin-bottom:6px;">
+                                            <input id="grs_enable_google" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[enable_google]" value="1" <?php checked((int) ($settings['enable_google'] ?? 1), 1); ?> />
+                                            <?php esc_html_e('Enable Google reviews', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                        <label for="grs_enable_trustpilot" style="display:block;">
+                                            <input id="grs_enable_trustpilot" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[enable_trustpilot]" value="1" <?php checked((int) ($settings['enable_trustpilot'] ?? 0), 1); ?> />
+                                            <?php esc_html_e('Enable Trustpilot reviews', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row" colspan="2"><h3 style="margin:10px 0 0;"><?php esc_html_e('Google API settings', 'business-reviews-slider-widget'); ?></h3></th>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row">
+                                        <label for="grs_place_id"><?php esc_html_e('Place ID', 'business-reviews-slider-widget'); ?></label>
+                                        <details class="grs-help-inline">
+                                            <summary aria-label="<?php esc_attr_e('How to get Place ID', 'business-reviews-slider-widget'); ?>">?</summary>
+                                            <div class="grs-help-content">
+                                                <strong><?php esc_html_e('How to get it:', 'business-reviews-slider-widget'); ?></strong>
+                                                <ol>
+                                                    <li><?php esc_html_e('Open your business in Google Maps.', 'business-reviews-slider-widget'); ?></li>
+                                                    <li><?php esc_html_e('Use Google Place ID Finder tool and paste the Maps URL.', 'business-reviews-slider-widget'); ?></li>
+                                                    <li><?php esc_html_e('Copy the Place ID (starts with ChIJ...).', 'business-reviews-slider-widget'); ?></li>
+                                                </ol>
+                                            </div>
+                                        </details>
+                                    </th>
+                                    <td>
+                                        <input id="grs_place_id" type="text" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[place_id]" class="regular-text" value="<?php echo esc_attr($settings['place_id'] ?? ''); ?>" placeholder="ChIJ..." />
+                                        <p class="description"><?php esc_html_e('Use either Place ID or Google Maps URL (one is enough).', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row">
+                                        <label for="grs_place_url"><?php esc_html_e('Google Maps URL', 'business-reviews-slider-widget'); ?></label>
+                                        <details class="grs-help-inline">
+                                            <summary aria-label="<?php esc_attr_e('How to get Google Maps URL', 'business-reviews-slider-widget'); ?>">?</summary>
+                                            <div class="grs-help-content">
+                                                <strong><?php esc_html_e('How to get it:', 'business-reviews-slider-widget'); ?></strong>
+                                                <ol>
+                                                    <li><?php esc_html_e('Open the business in Google Maps.', 'business-reviews-slider-widget'); ?></li>
+                                                    <li><?php esc_html_e('Click Share.', 'business-reviews-slider-widget'); ?></li>
+                                                    <li><?php esc_html_e('Copy the place URL and paste it here.', 'business-reviews-slider-widget'); ?></li>
+                                                </ol>
+                                            </div>
+                                        </details>
+                                    </th>
+                                    <td>
+                                        <input id="grs_place_url" type="url" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[place_url]" class="regular-text" value="<?php echo esc_attr($settings['place_url'] ?? ''); ?>" placeholder="https://www.google.com/maps/place/..." />
+                                        <p class="description"><?php esc_html_e('If Google Maps URL is provided, Place ID is optional.', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row">
+                                        <label for="grs_google_places_api_key"><?php esc_html_e('Google Places API key (optional)', 'business-reviews-slider-widget'); ?></label>
+                                        <details class="grs-help-inline">
+                                            <summary aria-label="<?php esc_attr_e('How to get Google Places API key', 'business-reviews-slider-widget'); ?>">?</summary>
+                                            <div class="grs-help-content">
+                                                <strong><?php esc_html_e('How to get it:', 'business-reviews-slider-widget'); ?></strong>
+                                                <ol>
+                                                    <li><?php esc_html_e('Open Google Cloud Console and create/select a project.', 'business-reviews-slider-widget'); ?></li>
+                                                    <li><?php esc_html_e('Enable Places API.', 'business-reviews-slider-widget'); ?></li>
+                                                    <li><?php esc_html_e('Create an API key (APIs & Services → Credentials) and paste it here.', 'business-reviews-slider-widget'); ?></li>
+                                                </ol>
+                                            </div>
+                                        </details>
+                                    </th>
+                                    <td><input id="grs_google_places_api_key" type="password" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[google_places_api_key]" class="regular-text" value="<?php echo esc_attr($settings['google_places_api_key'] ?? ''); ?>" placeholder="AIza..." /></td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Places API summary (optional)', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_use_places_api_summary">
+                                            <input id="grs_use_places_api_summary" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[use_places_api_summary]" value="1" <?php checked((int) ($settings['use_places_api_summary'] ?? 0), 1); ?> />
+                                            <?php esc_html_e('Use Places API rating and total reviews in header (requires Place ID + API key).', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_max_reviews"><?php esc_html_e('Max reviews', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <input id="grs_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[max_reviews]" value="<?php echo esc_attr((string) (($settings['max_reviews'] ?? 0) === 0 ? '' : ($settings['max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'business-reviews-slider-widget'); ?>" />
+                                        <p class="description"><?php esc_html_e('Leave empty to fetch all available reviews (can consume more Apify credits).', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_language"><?php esc_html_e('Language', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td><input id="grs_language" type="text" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[language]" value="<?php echo esc_attr($settings['language'] ?? 'en'); ?>" class="small-text" /></td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_trustpilot_domain"><?php esc_html_e('Trustpilot company domain', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <input id="grs_trustpilot_domain" type="text" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_domain]" class="regular-text" value="<?php echo esc_attr($settings['trustpilot_domain'] ?? ''); ?>" placeholder="example.com" />
+                                        <p class="description"><?php esc_html_e('Used to find the company on Trustpilot', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_trustpilot_max_reviews"><?php esc_html_e('Trustpilot max reviews', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <input id="grs_trustpilot_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_max_reviews]" value="<?php echo esc_attr((string) (($settings['trustpilot_max_reviews'] ?? 0) === 0 ? '' : ($settings['trustpilot_max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'business-reviews-slider-widget'); ?>" />
+                                        <p class="description"><?php esc_html_e('Leave empty to fetch all reviews', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row" colspan="2"><h3 style="margin:10px 0 0;"><?php esc_html_e('Google slider settings', 'business-reviews-slider-widget'); ?></h3></th>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_theme"><?php esc_html_e('Default slider theme', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <select id="grs_theme" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[theme]">
+                                            <option value="dark" <?php selected(($settings['theme'] ?? 'dark'), 'dark'); ?>><?php esc_html_e('Dark', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="light" <?php selected(($settings['theme'] ?? ''), 'light'); ?>><?php esc_html_e('Light', 'business-reviews-slider-widget'); ?></option>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Reviews without comment', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_show_no_comment">
+                                            <input id="grs_show_no_comment" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_no_comment]" value="1" <?php checked((int) ($settings['show_no_comment'] ?? 1), 1); ?> />
+                                            <?php esc_html_e('Hide ratings-only reviews (no text comment)', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Autoplay', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_autoplay_default">
+                                            <input id="grs_autoplay_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[autoplay_default]" value="1" <?php checked((int) ($settings['autoplay_default'] ?? 1), 1); ?> />
+                                            <?php esc_html_e('Enable automatic sliding by default', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_autoplay_interval_default"><?php esc_html_e('Autoplay interval (ms)', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <input id="grs_autoplay_interval_default" type="number" min="1500" max="20000" step="100" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[autoplay_interval_default]" value="<?php echo esc_attr((string) ($settings['autoplay_interval_default'] ?? 5500)); ?>" />
+                                        <p class="description"><?php esc_html_e('Default autoplay speed for the widget.', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Auto-fetch cron', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_cron_enabled">
+                                            <input id="grs_cron_enabled" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="1" <?php checked((int) ($settings['cron_enabled'] ?? 0), 1); ?> />
+                                            <?php esc_html_e('Enable scheduled automatic fetch', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_cron_frequency"><?php esc_html_e('Cron frequency', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <select id="grs_cron_frequency" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_frequency]">
+                                            <option value="twicedaily" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'twicedaily'); ?>><?php esc_html_e('Every 12 hours', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="daily" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'daily'); ?>><?php esc_html_e('Daily', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="grs_every_2_days" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'grs_every_2_days'); ?>><?php esc_html_e('Every 2 days', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="grs_monthly" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'grs_monthly'); ?>><?php esc_html_e('Once per month', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="weekly" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'weekly'); ?>><?php esc_html_e('Weekly (recommended)', 'business-reviews-slider-widget'); ?></option>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_cron_time"><?php esc_html_e('Cron start time', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <input id="grs_cron_time" type="time" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_time]" value="<?php echo esc_attr((string) ($settings['cron_time'] ?? '03:00')); ?>" />
+                                        <p class="description"><?php esc_html_e('Site local time. The event repeats based on selected frequency.', 'business-reviews-slider-widget'); ?></p>
+                                        <p class="description" style="color:#b32d2e;"><?php esc_html_e('Tip: Avoid running every day if possible. Frequent runs may exhaust free Apify credits/tokens.', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_cron_fetch_scope"><?php esc_html_e('Cron fetch scope', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <select id="grs_cron_fetch_scope" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_fetch_scope]">
+                                            <option value="enabled" <?php selected(($settings['cron_fetch_scope'] ?? 'enabled'), 'enabled'); ?>><?php esc_html_e('Enabled platforms only', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="all" <?php selected(($settings['cron_fetch_scope'] ?? 'enabled'), 'all'); ?>><?php esc_html_e('Fetch all (Google + Trustpilot)', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="google" <?php selected(($settings['cron_fetch_scope'] ?? 'enabled'), 'google'); ?>><?php esc_html_e('Fetch only Google', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="trustpilot" <?php selected(($settings['cron_fetch_scope'] ?? 'enabled'), 'trustpilot'); ?>><?php esc_html_e('Fetch only Trustpilot', 'business-reviews-slider-widget'); ?></option>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Infinite loop', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_loop_infinite_default">
+                                            <input id="grs_loop_infinite_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[loop_infinite_default]" value="1" <?php checked((int) ($settings['loop_infinite_default'] ?? 0), 1); ?> />
+                                            <?php esc_html_e('Loop slides infinitely and fill incomplete last page with next reviews', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Dots navigation', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_show_dots_default">
+                                            <input id="grs_show_dots_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_dots_default]" value="1" <?php checked((int) ($settings['show_dots_default'] ?? 1), 1); ?> />
+                                            <?php esc_html_e('Show pagination dots', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Top summary block', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_show_summary_default">
+                                            <input id="grs_show_summary_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_summary_default]" value="1" <?php checked((int) ($settings['show_summary_default'] ?? 1), 1); ?> />
+                                            <?php esc_html_e('Show top block with overall rating information', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Review link button', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_show_read_on_google_default">
+                                            <input id="grs_show_read_on_google_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_read_on_google_default]" value="1" <?php checked((int) ($settings['show_read_on_google_default'] ?? 1), 1); ?> />
+                                            <?php esc_html_e('Show "Read on Google" button on cards', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_rating_mode_default"><?php esc_html_e('Star rating source', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <select id="grs_rating_mode_default" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[rating_mode_default]">
+                                            <option value="auto" <?php selected(($settings['rating_mode_default'] ?? 'auto'), 'auto'); ?>><?php esc_html_e('Auto (from fetched reviews)', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="manual" <?php selected(($settings['rating_mode_default'] ?? ''), 'manual'); ?>><?php esc_html_e('Manual', 'business-reviews-slider-widget'); ?></option>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_manual_rating_default"><?php esc_html_e('Star manual rating (0-5)', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <input id="grs_manual_rating_default" type="number" min="0" max="5" step="0.1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[manual_rating_default]" value="<?php echo esc_attr((string) ($settings['manual_rating_default'] ?? 5)); ?>" />
+                                        <p class="description"><?php esc_html_e('Used when Star rating source is set to Manual.', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Swipe', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_swipe_default">
+                                            <input id="grs_swipe_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[swipe_default]" value="1" <?php checked((int) ($settings['swipe_default'] ?? 1), 1); ?> />
+                                            <?php esc_html_e('Enable touch swipe on mobile/tablet', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Cards per view', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_slides_mobile_default"><?php esc_html_e('Mobile', 'business-reviews-slider-widget'); ?></label>
+                                        <input id="grs_slides_mobile_default" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[slides_mobile_default]" value="<?php echo esc_attr((string) ($settings['slides_mobile_default'] ?? 1)); ?>" />
+                                        &nbsp;&nbsp;
+                                        <label for="grs_slides_tablet_default"><?php esc_html_e('Tablet', 'business-reviews-slider-widget'); ?></label>
+                                        <input id="grs_slides_tablet_default" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[slides_tablet_default]" value="<?php echo esc_attr((string) ($settings['slides_tablet_default'] ?? 2)); ?>" />
+                                        &nbsp;&nbsp;
+                                        <label for="grs_slides_desktop_default"><?php esc_html_e('Desktop', 'business-reviews-slider-widget'); ?></label>
+                                        <input id="grs_slides_desktop_default" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[slides_desktop_default]" value="<?php echo esc_attr((string) ($settings['slides_desktop_default'] ?? 3)); ?>" />
+                                        <p class="description"><?php esc_html_e('How many review cards to show at once by device size.', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_display_limit_default"><?php esc_html_e('Reviews to display', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <input id="grs_display_limit_default" type="number" min="6" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[display_limit_default]" value="<?php echo esc_attr((string) (($settings['display_limit_default'] ?? 0) === 0 ? '' : ($settings['display_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'business-reviews-slider-widget'); ?>" />
+                                        <p class="description"><?php esc_html_e('Frontend only: limit shown reviews. Leave empty to show all fetched reviews. Minimum when set: 6. Applied after filters (no-comment/rating).', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_min_rating_default"><?php esc_html_e('Default rating filter', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <select id="grs_min_rating_default" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[min_rating_default]">
+                                            <option value="0" <?php selected((int) ($settings['min_rating_default'] ?? 0), 0); ?>><?php esc_html_e('All ratings', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="5" <?php selected((int) ($settings['min_rating_default'] ?? 0), 5); ?>><?php esc_html_e('Only 5 stars', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="4" <?php selected((int) ($settings['min_rating_default'] ?? 0), 4); ?>><?php esc_html_e('4 stars and above', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="3" <?php selected((int) ($settings['min_rating_default'] ?? 0), 3); ?>><?php esc_html_e('3 stars and above', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="2" <?php selected((int) ($settings['min_rating_default'] ?? 0), 2); ?>><?php esc_html_e('2 stars and above', 'business-reviews-slider-widget'); ?></option>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_review_count_mode"><?php esc_html_e('Header review count source', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <select id="grs_review_count_mode" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[review_count_mode]">
+                                            <option value="fetched" <?php selected(($settings['review_count_mode'] ?? 'fetched'), 'fetched'); ?>><?php esc_html_e('Use fetched reviews count', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="custom" <?php selected(($settings['review_count_mode'] ?? ''), 'custom'); ?>><?php esc_html_e('Use custom count', 'business-reviews-slider-widget'); ?></option>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_custom_review_count"><?php esc_html_e('Custom review count', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <input id="grs_custom_review_count" type="number" min="0" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[custom_review_count]" value="<?php echo esc_attr((string) ($settings['custom_review_count'] ?? 0)); ?>" />
+                                        <p class="description"><?php esc_html_e('Used only when "Use custom count" is selected.', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row" colspan="2"><h3 style="margin:10px 0 0;"><?php esc_html_e('Trustpilot slider settings', 'business-reviews-slider-widget'); ?></h3></th>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_trustpilot_theme"><?php esc_html_e('Theme', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <select id="grs_trustpilot_theme" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_theme]">
+                                            <option value="dark" <?php selected(($settings['trustpilot_theme'] ?? 'dark'), 'dark'); ?>><?php esc_html_e('Dark', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="light" <?php selected(($settings['trustpilot_theme'] ?? ''), 'light'); ?>><?php esc_html_e('Light', 'business-reviews-slider-widget'); ?></option>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_trustpilot_logo_variant"><?php esc_html_e('Logo color', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <select id="grs_trustpilot_logo_variant" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_logo_variant]">
+                                            <option value="white" <?php selected(($settings['trustpilot_logo_variant'] ?? 'white'), 'white'); ?>><?php esc_html_e('White', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="black" <?php selected(($settings['trustpilot_logo_variant'] ?? ''), 'black'); ?>><?php esc_html_e('Black', 'business-reviews-slider-widget'); ?></option>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Autoplay', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_trustpilot_autoplay_default">
+                                            <input id="grs_trustpilot_autoplay_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_autoplay_default]" value="1" <?php checked((int) ($settings['trustpilot_autoplay_default'] ?? 1), 1); ?> />
+                                            <?php esc_html_e('Enable automatic sliding by default', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_trustpilot_autoplay_interval_default"><?php esc_html_e('Autoplay interval (ms)', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <input id="grs_trustpilot_autoplay_interval_default" type="number" min="1500" max="20000" step="100" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_autoplay_interval_default]" value="<?php echo esc_attr((string) ($settings['trustpilot_autoplay_interval_default'] ?? 5500)); ?>" />
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Infinite loop', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_trustpilot_loop_infinite_default">
+                                            <input id="grs_trustpilot_loop_infinite_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_loop_infinite_default]" value="1" <?php checked((int) ($settings['trustpilot_loop_infinite_default'] ?? 0), 1); ?> />
+                                            <?php esc_html_e('Loop slides infinitely', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Dots navigation', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_trustpilot_show_dots_default">
+                                            <input id="grs_trustpilot_show_dots_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_show_dots_default]" value="1" <?php checked((int) ($settings['trustpilot_show_dots_default'] ?? 1), 1); ?> />
+                                            <?php esc_html_e('Show pagination dots', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Swipe', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_trustpilot_swipe_default">
+                                            <input id="grs_trustpilot_swipe_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_swipe_default]" value="1" <?php checked((int) ($settings['trustpilot_swipe_default'] ?? 1), 1); ?> />
+                                            <?php esc_html_e('Enable touch swipe on mobile/tablet', 'business-reviews-slider-widget'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Cards per view', 'business-reviews-slider-widget'); ?></th>
+                                    <td>
+                                        <label for="grs_trustpilot_slides_mobile_default"><?php esc_html_e('Mobile', 'business-reviews-slider-widget'); ?></label>
+                                        <input id="grs_trustpilot_slides_mobile_default" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_slides_mobile_default]" value="<?php echo esc_attr((string) ($settings['trustpilot_slides_mobile_default'] ?? 1)); ?>" />
+                                        &nbsp;&nbsp;
+                                        <label for="grs_trustpilot_slides_tablet_default"><?php esc_html_e('Tablet', 'business-reviews-slider-widget'); ?></label>
+                                        <input id="grs_trustpilot_slides_tablet_default" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_slides_tablet_default]" value="<?php echo esc_attr((string) ($settings['trustpilot_slides_tablet_default'] ?? 2)); ?>" />
+                                        &nbsp;&nbsp;
+                                        <label for="grs_trustpilot_slides_desktop_default"><?php esc_html_e('Desktop', 'business-reviews-slider-widget'); ?></label>
+                                        <input id="grs_trustpilot_slides_desktop_default" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_slides_desktop_default]" value="<?php echo esc_attr((string) ($settings['trustpilot_slides_desktop_default'] ?? 3)); ?>" />
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_trustpilot_title_default"><?php esc_html_e('Slider title', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td><input id="grs_trustpilot_title_default" type="text" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_title_default]" value="<?php echo esc_attr((string) ($settings['trustpilot_title_default'] ?? 'Latest Trustpilot reviews')); ?>" class="regular-text" /></td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_trustpilot_display_limit_default"><?php esc_html_e('Reviews to display', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <input id="grs_trustpilot_display_limit_default" type="number" min="1" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_display_limit_default]" value="<?php echo esc_attr((string) (($settings['trustpilot_display_limit_default'] ?? 0) === 0 ? '' : ($settings['trustpilot_display_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'business-reviews-slider-widget'); ?>" />
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Top summary block', 'business-reviews-slider-widget'); ?></th>
+                                    <td><label for="grs_trustpilot_show_summary_default"><input id="grs_trustpilot_show_summary_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_show_summary_default]" value="1" <?php checked((int) ($settings['trustpilot_show_summary_default'] ?? 1), 1); ?> /> <?php esc_html_e('Show top block with overall rating information', 'business-reviews-slider-widget'); ?></label></td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Review titles', 'business-reviews-slider-widget'); ?></th>
+                                    <td><label for="grs_trustpilot_show_titles_default"><input id="grs_trustpilot_show_titles_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_show_titles_default]" value="1" <?php checked((int) ($settings['trustpilot_show_titles_default'] ?? 1), 1); ?> /> <?php esc_html_e('Show review headline/title on cards', 'business-reviews-slider-widget'); ?></label></td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Reviews without comment', 'business-reviews-slider-widget'); ?></th>
+                                    <td><label for="grs_trustpilot_show_no_comment_default"><input id="grs_trustpilot_show_no_comment_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_show_no_comment_default]" value="1" <?php checked((int) ($settings['trustpilot_show_no_comment_default'] ?? 1), 1); ?> /> <?php esc_html_e('Hide ratings-only reviews (no text comment)', 'business-reviews-slider-widget'); ?></label></td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_trustpilot_min_rating_default"><?php esc_html_e('Default rating filter', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <select id="grs_trustpilot_min_rating_default" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_min_rating_default]">
+                                            <option value="0" <?php selected((int) ($settings['trustpilot_min_rating_default'] ?? 0), 0); ?>><?php esc_html_e('All ratings', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="5" <?php selected((int) ($settings['trustpilot_min_rating_default'] ?? 0), 5); ?>><?php esc_html_e('Only 5 stars', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="4" <?php selected((int) ($settings['trustpilot_min_rating_default'] ?? 0), 4); ?>><?php esc_html_e('4 stars and above', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="3" <?php selected((int) ($settings['trustpilot_min_rating_default'] ?? 0), 3); ?>><?php esc_html_e('3 stars and above', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="2" <?php selected((int) ($settings['trustpilot_min_rating_default'] ?? 0), 2); ?>><?php esc_html_e('2 stars and above', 'business-reviews-slider-widget'); ?></option>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_trustpilot_review_count_mode"><?php esc_html_e('Header review count source', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <select id="grs_trustpilot_review_count_mode" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_review_count_mode]">
+                                            <option value="fetched" <?php selected(($settings['trustpilot_review_count_mode'] ?? 'fetched'), 'fetched'); ?>><?php esc_html_e('Use fetched reviews count', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="custom" <?php selected(($settings['trustpilot_review_count_mode'] ?? ''), 'custom'); ?>><?php esc_html_e('Use custom count', 'business-reviews-slider-widget'); ?></option>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_trustpilot_custom_review_count"><?php esc_html_e('Custom review count', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <input id="grs_trustpilot_custom_review_count" type="number" min="0" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_custom_review_count]" value="<?php echo esc_attr((string) ($settings['trustpilot_custom_review_count'] ?? 0)); ?>" />
+                                        <p class="description"><?php esc_html_e('Used only when custom count is selected.', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_trustpilot_rating_mode_default"><?php esc_html_e('Star rating source', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <select id="grs_trustpilot_rating_mode_default" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_rating_mode_default]">
+                                            <option value="auto" <?php selected(($settings['trustpilot_rating_mode_default'] ?? 'auto'), 'auto'); ?>><?php esc_html_e('Auto (from fetched reviews)', 'business-reviews-slider-widget'); ?></option>
+                                            <option value="manual" <?php selected(($settings['trustpilot_rating_mode_default'] ?? ''), 'manual'); ?>><?php esc_html_e('Manual', 'business-reviews-slider-widget'); ?></option>
+                                        </select>
+                                        <p class="description"><?php esc_html_e('Calculation might not be accurate when using Auto.', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_trustpilot_manual_rating_default"><?php esc_html_e('Star manual rating (0-5)', 'business-reviews-slider-widget'); ?></label></th>
+                                    <td>
+                                        <input id="grs_trustpilot_manual_rating_default" type="number" min="0" max="5" step="0.1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_manual_rating_default]" value="<?php echo esc_attr((string) ($settings['trustpilot_manual_rating_default'] ?? 5)); ?>" />
+                                        <p class="description"><?php esc_html_e('Used when Star rating source is set to Manual.', 'business-reviews-slider-widget'); ?></p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <?php submit_button(__('Save settings', 'business-reviews-slider-widget')); ?>
+                    </form>
+
+                    <div class="grs-fetch-row"<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                        <button type="button" class="button button-primary grs-fetch-btn" data-grs-fetch-scope="all">
+                            <?php esc_html_e('Fetch all reviews', 'business-reviews-slider-widget'); ?>
+                        </button>
+                        <span class="grs-status grs-fetch-status"></span>
+                    </div>
+                    <div class="grs-fetch-row"<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                        <button type="button" class="button button-primary grs-fetch-btn" data-grs-fetch-scope="google">
+                            <?php esc_html_e('Fetch Google reviews', 'business-reviews-slider-widget'); ?>
+                        </button>
+                        <span class="grs-status grs-fetch-status"></span>
+                    </div>
+                    <div class="grs-fetch-row"<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                        <button type="button" class="button button-primary grs-fetch-btn" data-grs-fetch-scope="trustpilot">
+                            <?php esc_html_e('Fetch Trustpilot reviews', 'business-reviews-slider-widget'); ?>
+                        </button>
+                        <span class="grs-status grs-fetch-status"></span>
+                    </div>
+                </div>
+
+                <div class="grs-card grs-info">
+                    <h2><?php esc_html_e('Data status', 'business-reviews-slider-widget'); ?></h2>
+                    <p><strong><?php echo esc_html((string) $count); ?></strong> <?php esc_html_e('reviews stored in DB.', 'business-reviews-slider-widget'); ?></p>
+                    <?php /* translators: 1: Number of Google reviews, 2: Number of Trustpilot reviews. */ ?>
+                    <p class="description"><?php echo esc_html(sprintf(__('Google: %1$d, Trustpilot: %2$d', 'business-reviews-slider-widget'), (int) $googleCount, (int) $trustpilotCount)); ?></p>
+                    <p>
+                        <?php esc_html_e('Last update:', 'business-reviews-slider-widget'); ?>
+                        <strong><?php echo $updated ? esc_html(date_i18n(get_option('date_format') . ' ' . get_option('time_format'), (int) $updated)) : esc_html__('Never', 'business-reviews-slider-widget'); ?></strong>
+                    </p>
+                    <p>
+                        <?php esc_html_e('Next scheduled fetch:', 'business-reviews-slider-widget'); ?>
+                        <strong><?php echo $nextCronTs ? esc_html(date_i18n(get_option('date_format') . ' ' . get_option('time_format'), (int) $nextCronTs)) : esc_html__('Not scheduled', 'business-reviews-slider-widget'); ?></strong>
+                    </p>
+
+                    <hr />
+
+                    <h3><?php esc_html_e('Shortcode', 'business-reviews-slider-widget'); ?></h3>
+                    <p><code>[google_reviews_slider]</code></p>
+                    <p><code>[trustpilot_reviews_slider]</code></p>
+                    <p><?php esc_html_e('Optional attributes:', 'business-reviews-slider-widget'); ?> <code>theme="dark|light" limit="0" autoplay="1" interval="5500" loop="0|1" show_dots="0|1" swipe="0|1" mobile="1-6" tablet="1-6" desktop="1-6" show_summary="0|1" show_read_on_google="0|1" rating_mode="auto|manual" manual_rating="0-5" min_rating="0|2|3|4|5" show_no_comment="1"</code></p>
+                    <p class="description"><?php esc_html_e('show_no_comment="1" hides ratings-only reviews without text comments.', 'business-reviews-slider-widget'); ?></p>
+                </div>
+            </div>
+        </div>
+        <?php
+    }
+
+    public function ajax_fetch_reviews(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_send_json_error(['message' => __('Not allowed.', 'business-reviews-slider-widget')], 403);
+        }
+
+        check_ajax_referer(self::AJAX_ACTION, 'nonce');
+
+        $settings = get_option(self::SETTINGS_OPTION, []);
+        $scope = isset($_POST['scope']) ? sanitize_key((string) wp_unslash($_POST['scope'])) : 'enabled';
+        if (! in_array($scope, ['enabled', 'all', 'google', 'trustpilot'], true)) {
+            $scope = 'enabled';
+        }
+
+        $result = $this->fetch_and_store_reviews($settings, $scope);
+
+        if (! $result['success']) {
+            wp_send_json_error([
+                'message' => $result['message'],
+                'body'    => $result['body'] ?? '',
+            ], isset($result['status']) ? (int) $result['status'] : 500);
+        }
+
+        wp_send_json_success([
+            'message' => sprintf(
+                /* translators: %d: Number of loaded reviews. */
+                _n('Loaded %d review.', 'Loaded %d reviews.', (int) $result['count'], 'business-reviews-slider-widget'),
+                (int) $result['count']
+            ),
+            'count' => (int) $result['count'],
+            'total' => (int) $result['total'],
+        ]);
+    }
+
+    public function run_scheduled_fetch(): void
+    {
+        $settings = get_option(self::SETTINGS_OPTION, []);
+        if (! isset($settings['cron_enabled']) || (int) $settings['cron_enabled'] !== 1) {
+            return;
+        }
+
+        $scope = isset($settings['cron_fetch_scope']) ? sanitize_key((string) $settings['cron_fetch_scope']) : 'enabled';
+        if (! in_array($scope, ['enabled', 'all', 'google', 'trustpilot'], true)) {
+            $scope = 'enabled';
+        }
+
+        $this->fetch_and_store_reviews($settings, $scope);
+    }
+
+    public function on_settings_updated($oldValue, $value): void
+    {
+        if (! is_array($value)) {
+            return;
+        }
+
+        $this->reschedule_cron($value);
+    }
+
+    public function ensure_cron_schedule(): void
+    {
+        $settings = get_option(self::SETTINGS_OPTION, []);
+        if (! is_array($settings)) {
+            return;
+        }
+
+        $enabled = isset($settings['cron_enabled']) && (int) $settings['cron_enabled'] === 1;
+        $scheduled = wp_next_scheduled(self::CRON_HOOK);
+
+        if ($enabled && ! $scheduled) {
+            $this->reschedule_cron($settings);
+        }
+
+        if (! $enabled && $scheduled) {
+            $this->unschedule_cron();
+        }
+    }
+
+    public function register_cron_schedules(array $schedules): array
+    {
+        $schedules['grs_every_2_days'] = [
+            'interval' => 2 * DAY_IN_SECONDS,
+            'display'  => __('Every 2 days', 'business-reviews-slider-widget'),
+        ];
+
+        $schedules['grs_monthly'] = [
+            'interval' => 30 * DAY_IN_SECONDS,
+            'display'  => __('Once per month', 'business-reviews-slider-widget'),
+        ];
+
+        return $schedules;
+    }
+
+    private function fetch_and_store_reviews(array $settings, string $scope = 'enabled'): array
+    {
+        $scope = sanitize_key($scope);
+        if (! in_array($scope, ['enabled', 'all', 'google', 'trustpilot'], true)) {
+            $scope = 'enabled';
+        }
+
+        if ($scope === 'all') {
+            $googleEnabled = true;
+            $trustpilotEnabled = true;
+        } elseif ($scope === 'google') {
+            $googleEnabled = true;
+            $trustpilotEnabled = false;
+        } elseif ($scope === 'trustpilot') {
+            $googleEnabled = false;
+            $trustpilotEnabled = true;
+        } else {
+            $googleEnabled = ! isset($settings['enable_google']) || (int) $settings['enable_google'] === 1;
+            $trustpilotEnabled = isset($settings['enable_trustpilot']) && (int) $settings['enable_trustpilot'] === 1;
+        }
+
+        if (! $googleEnabled && ! $trustpilotEnabled) {
+            return [
+                'success' => false,
+                'status'  => 400,
+                'message' => (string) __('Enable at least one platform (Google or Trustpilot).', 'business-reviews-slider-widget'),
+            ];
+        }
+
+        $token = isset($settings['token']) ? trim((string) $settings['token']) : '';
+
+        if ($token === '') {
+            return [
+                'success' => false,
+                'status'  => 400,
+                'message' => (string) __('Add your Apify token in settings.', 'business-reviews-slider-widget'),
+            ];
+        }
+
+        $loadedCount = 0;
+        $loadedTotal = 0;
+
+        if ($googleEnabled) {
+            $googleResult = $this->fetch_google_reviews($settings, $token);
+            if (! $googleResult['success']) {
+                return $googleResult;
+            }
+            $loadedCount += (int) ($googleResult['count'] ?? 0);
+            $loadedTotal += (int) ($googleResult['total'] ?? 0);
+        }
+
+        if ($trustpilotEnabled) {
+            $trustpilotResult = $this->fetch_trustpilot_reviews($settings, $token);
+            if (! $trustpilotResult['success']) {
+                return $trustpilotResult;
+            }
+            $loadedCount += (int) ($trustpilotResult['count'] ?? 0);
+            $loadedTotal += (int) ($trustpilotResult['total'] ?? 0);
+        }
+
+        return [
+            'success' => true,
+            'count'   => $loadedCount,
+            'total'   => $loadedTotal,
+        ];
+    }
+
+    private function fetch_google_reviews(array $settings, string $token): array
+    {
+        $placeId = isset($settings['place_id']) ? trim((string) $settings['place_id']) : '';
+        $placeUrlInput = isset($settings['place_url']) ? trim((string) $settings['place_url']) : '';
+        $placesApiKey = isset($settings['google_places_api_key']) ? trim((string) $settings['google_places_api_key']) : '';
+        $usePlacesApiSummary = isset($settings['use_places_api_summary']) && (int) $settings['use_places_api_summary'] === 1;
+        $maxReviews = isset($settings['max_reviews']) ? max(0, min(500, (int) $settings['max_reviews'])) : 0;
+        $language = isset($settings['language']) && $settings['language'] !== '' ? (string) $settings['language'] : 'en';
+
+        $placeUrl = $placeUrlInput;
+        if ($placeUrl === '' && $placeId !== '') {
+            $placeUrl = 'https://www.google.com/maps/place/?q=place_id:' . rawurlencode($placeId);
+        }
+
+        if ($placeUrl === '') {
+            return [
+                'success' => false,
+                'status'  => 400,
+                'message' => (string) __('Provide Place ID or Google Maps URL.', 'business-reviews-slider-widget'),
+            ];
+        }
+
+        $actorId = 'compass~google-maps-reviews-scraper';
+        $endpoint = sprintf(
+            'https://api.apify.com/v2/acts/%s/run-sync-get-dataset-items?token=%s',
+            rawurlencode($actorId),
+            rawurlencode($token)
+        );
+
+        $input = [
+            'startUrls' => [
+                ['url' => esc_url_raw($placeUrl)],
+            ],
+            'language' => sanitize_text_field($language),
+        ];
+
+        if ($maxReviews > 0) {
+            $input['maxReviews'] = $maxReviews;
+        }
+
+        $response = wp_remote_post($endpoint, [
+            'timeout' => 300,
+            'headers' => [
+                'Content-Type' => 'application/json',
+            ],
+            'body'    => wp_json_encode($input),
+        ]);
+
+        if (is_wp_error($response)) {
+            $errorMessage = (string) $response->get_error_message();
+            if (stripos($errorMessage, 'cURL error 28') !== false) {
+                $errorMessage = (string) __('Request timed out while waiting for Apify. Try a smaller review count or run again in a minute.', 'business-reviews-slider-widget');
+            }
+
+            return [
+                'success' => false,
+                'status'  => 500,
+                'message' => $errorMessage,
+            ];
+        }
+
+        $status = wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+
+        if ($status < 200 || $status >= 300) {
+            return [
+                'success' => false,
+                'status'  => $status,
+                /* translators: %d: HTTP status code. */
+                'message' => sprintf(__('Google fetch failed (%d).', 'business-reviews-slider-widget'), (int) $status),
+                'body'    => $body,
+            ];
+        }
+
+        $items = json_decode($body, true);
+        if (! is_array($items)) {
+            $items = [];
+        }
+
+        $reviews = $this->normalise_reviews($items);
+        $totalReviews = $this->extract_total_reviews($items, count($reviews));
+        $placesSummary = [];
+
+        if ($usePlacesApiSummary && $placeId !== '' && $placesApiKey !== '') {
+            $placesSummary = $this->fetch_places_summary($placeId, $placesApiKey);
+        }
+
+        update_option(self::CACHE_OPTION, [
+            'reviews'              => $reviews,
+            'total_reviews'        => $totalReviews,
+            'places_rating'        => isset($placesSummary['rating']) ? (float) $placesSummary['rating'] : 0,
+            'places_total_reviews' => isset($placesSummary['total_reviews']) ? absint($placesSummary['total_reviews']) : 0,
+            'places_url'           => isset($placesSummary['url']) ? esc_url_raw((string) $placesSummary['url']) : '',
+            'updated_at'           => time(),
+        ], false);
+
+        return [
+            'success' => true,
+            'count'   => count($reviews),
+            'total'   => $totalReviews,
+        ];
+    }
+
+    private function fetch_trustpilot_reviews(array $settings, string $token): array
+    {
+        $domain = isset($settings['trustpilot_domain']) ? trim((string) $settings['trustpilot_domain']) : '';
+        $maxReviews = isset($settings['trustpilot_max_reviews']) ? max(0, min(500, (int) $settings['trustpilot_max_reviews'])) : 0;
+
+        if ($domain === '') {
+            return [
+                'success' => false,
+                'status'  => 400,
+                'message' => (string) __('Add Trustpilot company domain in settings.', 'business-reviews-slider-widget'),
+            ];
+        }
+
+        $actorId = 'fLXimoyuhE1UQgDbM';
+        $endpoint = sprintf(
+            'https://api.apify.com/v2/acts/%s/run-sync-get-dataset-items?token=%s',
+            rawurlencode($actorId),
+            rawurlencode($token)
+        );
+
+        $trustpilotUrl = 'https://www.trustpilot.com/review/' . ltrim($domain, '/');
+        $input = [
+            'companyDomain' => sanitize_text_field($domain),
+            'replies'       => false,
+            'startPage'     => 1,
+            'verified'      => false,
+        ];
+
+        if ($maxReviews > 0) {
+            $input['count'] = $maxReviews;
+        }
+
+        $response = wp_remote_post($endpoint, [
+            'timeout' => 300,
+            'headers' => [
+                'Content-Type' => 'application/json',
+            ],
+            'body'    => wp_json_encode($input),
+        ]);
+
+        if (is_wp_error($response)) {
+            $errorMessage = (string) $response->get_error_message();
+            if (stripos($errorMessage, 'cURL error 28') !== false) {
+                $errorMessage = (string) __('Request timed out while waiting for Apify. Try a smaller review count or run again in a minute.', 'business-reviews-slider-widget');
+            }
+
+            return [
+                'success' => false,
+                'status'  => 500,
+                'message' => $errorMessage,
+            ];
+        }
+
+        $status = wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+
+        if ($status < 200 || $status >= 300) {
+            return [
+                'success' => false,
+                'status'  => $status,
+                /* translators: %d: HTTP status code. */
+                'message' => sprintf(__('Trustpilot fetch failed (%d).', 'business-reviews-slider-widget'), (int) $status),
+                'body'    => $body,
+            ];
+        }
+
+        $items = json_decode($body, true);
+        if (! is_array($items)) {
+            $items = [];
+        }
+
+        $reviews = $this->normalise_trustpilot_reviews($items);
+        $totalReviews = $this->extract_total_reviews($items, count($reviews));
+
+        update_option(self::TRUSTPILOT_CACHE_OPTION, [
+            'reviews'        => $reviews,
+            'total_reviews'  => $totalReviews,
+            'company_domain' => sanitize_text_field($domain),
+            'company_url'    => esc_url_raw($trustpilotUrl),
+            'updated_at'     => time(),
+        ], false);
+
+        return [
+            'success' => true,
+            'count'   => count($reviews),
+            'total'   => $totalReviews,
+        ];
+    }
+
+    private function reschedule_cron(array $settings): void
+    {
+        $this->unschedule_cron();
+
+        if (! isset($settings['cron_enabled']) || (int) $settings['cron_enabled'] !== 1) {
+            return;
+        }
+
+        $frequency = isset($settings['cron_frequency']) ? sanitize_key((string) $settings['cron_frequency']) : 'weekly';
+        if (! in_array($frequency, ['twicedaily', 'daily', 'weekly', 'grs_every_2_days', 'grs_monthly'], true)) {
+            $frequency = 'weekly';
+        }
+
+        $timeString = isset($settings['cron_time']) ? (string) $settings['cron_time'] : '03:00';
+        $timestamp = $this->next_run_timestamp($timeString, $frequency);
+
+        wp_schedule_event($timestamp, $frequency, self::CRON_HOOK);
+    }
+
+    private function unschedule_cron(): void
+    {
+        $next = wp_next_scheduled(self::CRON_HOOK);
+        while ($next) {
+            wp_unschedule_event($next, self::CRON_HOOK);
+            $next = wp_next_scheduled(self::CRON_HOOK);
+        }
+    }
+
+    private function next_run_timestamp(string $timeString, string $frequency): int
+    {
+        $tz = wp_timezone();
+        $now = new DateTimeImmutable('now', $tz);
+
+        if (! preg_match('/^([01]\d|2[0-3]):([0-5]\d)$/', $timeString, $m)) {
+            $timeString = '03:00';
+            preg_match('/^([01]\d|2[0-3]):([0-5]\d)$/', $timeString, $m);
+        }
+
+        $hour = isset($m[1]) ? (int) $m[1] : 3;
+        $minute = isset($m[2]) ? (int) $m[2] : 0;
+
+        $target = $now->setTime($hour, $minute, 0);
+        $interval = $this->schedule_interval_seconds($frequency);
+        $ts = $target->getTimestamp();
+
+        if ($ts <= time()) {
+            $ts += $interval;
+        }
+
+        while ($ts <= time()) {
+            $ts += $interval;
+        }
+
+        return $ts;
+    }
+
+    private function schedule_interval_seconds(string $frequency): int
+    {
+        $schedules = wp_get_schedules();
+        if (isset($schedules[$frequency]['interval'])) {
+            return (int) $schedules[$frequency]['interval'];
+        }
+
+        return WEEK_IN_SECONDS;
+    }
+
+    private function normalise_reviews(array $items): array
+    {
+        $out = [];
+
+        foreach ($items as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            // Actor fields used here:
+            // title, url, stars, name, reviewUrl, text
+            $author = $item['name'] ?? __('Anonymous', 'business-reviews-slider-widget');
+            $rating = $item['stars'] ?? 0;
+            $text = $item['text'] ?? '';
+            $date = $item['publishedAtDate']
+                ?? ($item['publishedAt']
+                    ?? ($item['reviewedAt']
+                        ?? ($item['date'] ?? '')));
+            $url = $item['reviewUrl'] ?? '';
+            $avatar = '';
+
+            $entry = [
+                'author' => sanitize_text_field((string) $author),
+                'rating' => max(0, min(5, (float) $rating)),
+                'text'   => sanitize_textarea_field((string) $text),
+                'date'   => sanitize_text_field((string) $date),
+                'url'    => esc_url_raw((string) $url),
+                'avatar' => $avatar,
+            ];
+
+            if ($entry['text'] === '' && $entry['rating'] <= 0) {
+                continue;
+            }
+
+            $out[] = $entry;
+        }
+
+        return $out;
+    }
+
+    private function normalise_trustpilot_reviews(array $items): array
+    {
+        $out = [];
+        $stack = [$items];
+
+        while (! empty($stack)) {
+            $node = array_pop($stack);
+            if (! is_array($node)) {
+                continue;
+            }
+
+            foreach ($node as $value) {
+                if (is_array($value)) {
+                    $stack[] = $value;
+                }
+            }
+
+            $author = $this->first_scalar_by_keys($node, [
+                'consumerName',
+                'authorName',
+                'displayName',
+                'name',
+            ]);
+
+            if ($author === '' && isset($node['consumer']) && is_array($node['consumer'])) {
+                $author = $this->first_scalar_by_keys($node['consumer'], ['displayName', 'name']);
+            }
+
+            $ratingRaw = $this->first_mixed_by_keys($node, ['rating', 'stars', 'ratingValue', 'score']);
+            if (is_array($ratingRaw)) {
+                $ratingRaw = $this->first_mixed_by_keys($ratingRaw, ['value', 'stars', 'rating']);
+            }
+
+            $headline = $this->first_scalar_by_keys($node, ['reviewHeadline', 'headline', 'title', 'reviewTitle']);
+
+            $textRaw = $this->first_mixed_by_keys($node, ['reviewBody', 'text', 'reviewText', 'content', 'message', 'comment', 'review']);
+            if (is_array($textRaw)) {
+                $textRaw = $this->first_mixed_by_keys($textRaw, ['content', 'text', 'message']);
+            }
+
+            $date = $this->first_scalar_by_keys($node, ['datePublished', 'date', 'publishedDate', 'createdAt', 'publishedAt']);
+            $url = $this->first_scalar_by_keys($node, ['reviewUrl', 'url', 'reviewLink', 'link']);
+
+            $avatar = '';
+            if (isset($node['consumer']) && is_array($node['consumer'])) {
+                $avatar = $this->extract_avatar_url($node['consumer']);
+            }
+            if ($avatar === '') {
+                $avatar = $this->extract_avatar_url($node);
+            }
+
+            $author = $author !== '' ? $author : (string) __('Anonymous', 'business-reviews-slider-widget');
+            $rating = is_scalar($ratingRaw) ? (float) $ratingRaw : 0;
+            $text = is_scalar($textRaw) ? trim((string) $textRaw) : '';
+
+            if ($headline === '' && $text === '' && $rating <= 0) {
+                continue;
+            }
+
+            $entry = [
+                'author'   => sanitize_text_field((string) $author),
+                'rating'   => max(0, min(5, $rating)),
+                'headline' => sanitize_text_field((string) $headline),
+                'text'     => sanitize_textarea_field($text),
+                'date'     => sanitize_text_field((string) $date),
+                'url'      => esc_url_raw((string) $url),
+                'avatar'   => $avatar,
+            ];
+
+            $key = md5(strtolower($entry['author'] . '|' . $entry['date'] . '|' . $entry['headline'] . '|' . $entry['text'] . '|' . $entry['url']));
+            $out[$key] = $entry;
+        }
+
+        return array_values($out);
+    }
+
+    private function first_mixed_by_keys(array $source, array $keys)
+    {
+        foreach ($keys as $key) {
+            if (array_key_exists($key, $source)) {
+                return $source[$key];
+            }
+        }
+
+        return null;
+    }
+
+    private function first_scalar_by_keys(array $source, array $keys): string
+    {
+        $value = $this->first_mixed_by_keys($source, $keys);
+        if (is_scalar($value)) {
+            return trim((string) $value);
+        }
+
+        return '';
+    }
+
+    public function render_shortcode(array $atts = []): string
+    {
+        $settings = get_option(self::SETTINGS_OPTION, []);
+        if (isset($settings['enable_google']) && (int) $settings['enable_google'] !== 1) {
+            return '';
+        }
+        $cache = get_option(self::CACHE_OPTION, []);
+
+        $reviews = isset($cache['reviews']) && is_array($cache['reviews']) ? $cache['reviews'] : [];
+        $fetchedReviewCount = count($reviews);
+        $reviewCountMode = isset($settings['review_count_mode']) ? (string) $settings['review_count_mode'] : 'fetched';
+        $customReviewCount = isset($settings['custom_review_count']) ? absint($settings['custom_review_count']) : 0;
+        $usePlacesApiSummary = isset($settings['use_places_api_summary']) && (int) $settings['use_places_api_summary'] === 1;
+        $placesTotalReviews = isset($cache['places_total_reviews']) ? absint($cache['places_total_reviews']) : 0;
+        $placesRating = isset($cache['places_rating']) ? (float) $cache['places_rating'] : 0;
+        $headerReviewCount = $reviewCountMode === 'custom' && $customReviewCount > 0
+            ? $customReviewCount
+            : (($usePlacesApiSummary && $placesTotalReviews > 0) ? $placesTotalReviews : $fetchedReviewCount);
+        $defaultTheme = isset($settings['theme']) ? $settings['theme'] : 'dark';
+        $defaultAutoplay = isset($settings['autoplay_default']) ? (int) $settings['autoplay_default'] : 1;
+        $defaultInterval = isset($settings['autoplay_interval_default']) ? max(1500, min(20000, absint($settings['autoplay_interval_default']))) : 5500;
+        $defaultLoop = isset($settings['loop_infinite_default']) ? (int) $settings['loop_infinite_default'] : 0;
+        $defaultShowDots = isset($settings['show_dots_default']) ? (int) $settings['show_dots_default'] : 1;
+        $defaultSwipe = isset($settings['swipe_default']) ? (int) $settings['swipe_default'] : 1;
+        $defaultMobile = isset($settings['slides_mobile_default']) ? max(1, min(6, absint($settings['slides_mobile_default']))) : 1;
+        $defaultTablet = isset($settings['slides_tablet_default']) ? max(1, min(6, absint($settings['slides_tablet_default']))) : 2;
+        $defaultDesktop = isset($settings['slides_desktop_default']) ? max(1, min(6, absint($settings['slides_desktop_default']))) : 3;
+        $defaultDisplayLimit = isset($settings['display_limit_default']) ? max(0, min(500, absint($settings['display_limit_default']))) : 0;
+        $defaultShowSummary = isset($settings['show_summary_default']) ? (int) $settings['show_summary_default'] : 1;
+        $defaultShowReadOnGoogle = isset($settings['show_read_on_google_default']) ? (int) $settings['show_read_on_google_default'] : 1;
+        $defaultRatingMode = isset($settings['rating_mode_default']) ? (string) $settings['rating_mode_default'] : 'auto';
+        $defaultManualRating = isset($settings['manual_rating_default']) ? (float) $settings['manual_rating_default'] : 5;
+        $defaultMinRating = isset($settings['min_rating_default']) ? absint($settings['min_rating_default']) : 0;
+        $googleMapsUrl = isset($cache['places_url']) ? trim((string) $cache['places_url']) : '';
+        if ($googleMapsUrl === '') {
+            $googleMapsUrl = isset($settings['place_url']) ? trim((string) $settings['place_url']) : '';
+        }
+        if ($googleMapsUrl === '') {
+            $placeId = isset($settings['place_id']) ? trim((string) $settings['place_id']) : '';
+            if ($placeId !== '') {
+                $googleMapsUrl = 'https://www.google.com/maps/place/?q=place_id:' . rawurlencode($placeId);
+            }
+        }
+
+        $atts = shortcode_atts([
+            'theme'    => $defaultTheme,
+            'limit'    => (string) $defaultDisplayLimit,
+            'autoplay' => $defaultAutoplay,
+            'interval' => $defaultInterval,
+            'loop'     => $defaultLoop,
+            'show_dots' => $defaultShowDots,
+            'swipe'     => $defaultSwipe,
+            'mobile'    => (string) $defaultMobile,
+            'tablet'    => (string) $defaultTablet,
+            'desktop'   => (string) $defaultDesktop,
+            'show_summary' => $defaultShowSummary,
+            'show_read_on_google' => $defaultShowReadOnGoogle,
+            'rating_mode'  => $defaultRatingMode,
+            'manual_rating' => (string) $defaultManualRating,
+            'title'    => __('Latest reviews', 'business-reviews-slider-widget'),
+            'min_rating' => (string) $defaultMinRating,
+            'show_no_comment' => isset($settings['show_no_comment']) ? (string) ((int) $settings['show_no_comment']) : '1',
+        ], $atts, 'google_reviews_slider');
+
+        $theme = in_array($atts['theme'], ['dark', 'light'], true) ? $atts['theme'] : 'dark';
+        $limit = absint((string) $atts['limit']);
+        $autoplay = (int) $atts['autoplay'] === 1 ? '1' : '0';
+        $interval = max(1500, min(20000, absint($atts['interval'])));
+        $loop = (int) $atts['loop'] === 1 ? '1' : '0';
+        $showDots = (int) $atts['show_dots'] === 1 ? '1' : '0';
+        $swipe = (int) $atts['swipe'] === 1 ? '1' : '0';
+        $mobileCols = max(1, min(6, absint((string) $atts['mobile'])));
+        $tabletCols = max(1, min(6, absint((string) $atts['tablet'])));
+        $desktopCols = max(1, min(6, absint((string) $atts['desktop'])));
+        $showSummary = (int) $atts['show_summary'] === 1 ? '1' : '0';
+        $showReadOnGoogle = (int) $atts['show_read_on_google'] === 1 ? '1' : '0';
+        $ratingMode = in_array((string) $atts['rating_mode'], ['auto', 'manual'], true) ? (string) $atts['rating_mode'] : 'auto';
+        $manualRating = max(0, min(5, (float) $atts['manual_rating']));
+        $minRating = absint((string) $atts['min_rating']);
+        $minRating = in_array($minRating, [0, 2, 3, 4, 5], true) ? $minRating : 0;
+        $hideNoComment = (string) $atts['show_no_comment'] === '1';
+
+        $rawReviews = $reviews;
+
+        if ($hideNoComment) {
+            $reviews = array_values(array_filter($reviews, static function (array $review): bool {
+                $text = isset($review['text']) ? trim((string) $review['text']) : '';
+                $headline = isset($review['headline']) ? trim((string) $review['headline']) : '';
+                return $text !== '' || $headline !== '';
+            }));
+        }
+
+        if ($minRating > 0) {
+            $reviews = array_values(array_filter($reviews, static function (array $review) use ($minRating): bool {
+                $rating = isset($review['rating']) ? (float) $review['rating'] : 0;
+                return $rating >= $minRating;
+            }));
+        }
+
+        $reviews = $this->sort_reviews_newest_first($reviews);
+
+        if ($limit > 0) {
+            $reviews = array_slice($reviews, 0, min(100, $limit));
+        }
+
+        if (empty($reviews) && ! empty($rawReviews)) {
+            $reviews = $rawReviews;
+        }
+
+        wp_enqueue_style('brsw-frontend-style');
+        wp_enqueue_script('brsw-frontend-script');
+
+        ob_start();
+        ?>
+        <section class="grs-slider-shell grs-theme-<?php echo esc_attr($theme); ?>" data-grs-slider data-autoplay="<?php echo esc_attr($autoplay); ?>" data-interval="<?php echo esc_attr((string) $interval); ?>" data-loop="<?php echo esc_attr($loop); ?>" data-show-dots="<?php echo esc_attr($showDots); ?>" data-swipe="<?php echo esc_attr($swipe); ?>" data-mobile="<?php echo esc_attr((string) $mobileCols); ?>" data-tablet="<?php echo esc_attr((string) $tabletCols); ?>" data-desktop="<?php echo esc_attr((string) $desktopCols); ?>">
+            <?php if (! empty($reviews) && $showSummary === '1') :
+                $sum = 0;
+                foreach ($reviews as $r) {
+                    $sum += isset($r['rating']) ? (float) $r['rating'] : 0;
+                }
+                $autoAvg = count($reviews) > 0 ? round($sum / count($reviews), 1) : 0;
+                $avg = $ratingMode === 'manual'
+                    ? $manualRating
+                    : (($usePlacesApiSummary && $placesRating > 0) ? $placesRating : $autoAvg);
+                $ratingLabel = $this->rating_label($avg);
+                ?>
+                <div class="grs-header-score">
+                    <div class="grs-score-title"><?php echo esc_html($ratingLabel); ?></div>
+                    <div class="grs-score-stars" aria-hidden="true"><?php echo wp_kses_post($this->star_html($avg)); ?></div>
+                    <div class="grs-score-meta">
+                        <?php
+                        echo esc_html(
+                            sprintf(
+                                /* translators: %d: Number of reviews. */
+                                _n('Based on %d review', 'Based on %d reviews', $headerReviewCount, 'business-reviews-slider-widget'),
+                                $headerReviewCount
+                            )
+                        );
+                        ?>
+                    </div>
+                    <?php if ($googleMapsUrl !== '') : ?>
+                        <a class="grs-google-logo" href="<?php echo esc_url($googleMapsUrl); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php esc_attr_e('Open Google Maps place page', 'business-reviews-slider-widget'); ?>">
+                            <span class="g-b">G</span><span class="g-r">o</span><span class="g-y">o</span><span class="g-b">g</span><span class="g-g">l</span><span class="g-r">e</span>
+                        </a>
+                    <?php else : ?>
+                        <div class="grs-google-logo" aria-label="Google" role="img">
+                            <span class="g-b">G</span><span class="g-r">o</span><span class="g-y">o</span><span class="g-b">g</span><span class="g-g">l</span><span class="g-r">e</span>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
+
+            <div class="grs-slider-top">
+                <div class="grs-slider-title"><?php echo esc_html((string) $atts['title']); ?></div>
+                <div class="grs-controls">
+                    <button class="grs-icon-btn" data-grs-prev aria-label="<?php esc_attr_e('Previous', 'business-reviews-slider-widget'); ?>">&#x2039;</button>
+                    <button class="grs-icon-btn" data-grs-next aria-label="<?php esc_attr_e('Next', 'business-reviews-slider-widget'); ?>">&#x203A;</button>
+                </div>
+            </div>
+
+            <div class="grs-slider" aria-live="polite">
+                <div class="grs-track" data-grs-track>
+                    <?php if (empty($reviews)) : ?>
+                        <div class="grs-slide">
+                            <article class="grs-card">
+                                <div class="grs-text"><?php esc_html_e('No reviews loaded yet.', 'business-reviews-slider-widget'); ?></div>
+                            </article>
+                        </div>
+                    <?php else : ?>
+                        <?php foreach ($reviews as $review) :
+                            $author = isset($review['author']) ? $review['author'] : __('Anonymous', 'business-reviews-slider-widget');
+                            $text = isset($review['text']) ? $review['text'] : '';
+                            $date = isset($review['date']) ? $this->format_date((string) $review['date']) : '';
+                            $rating = isset($review['rating']) ? (float) $review['rating'] : 0;
+                            $avatar = isset($review['avatar']) ? $review['avatar'] : '';
+                            $url = isset($review['url']) ? $review['url'] : '';
+                            ?>
+                            <div class="grs-slide">
+                                <article class="grs-card">
+                                    <div class="grs-card-top">
+                                        <div class="grs-author">
+                                            <div class="grs-avatar">
+                                                <?php if ($avatar !== '') : ?>
+                                                    <img src="<?php echo esc_url($avatar); ?>" alt="<?php echo esc_attr($author); ?>" loading="lazy" />
+                                                <?php else : ?>
+                                                    <?php echo esc_html($this->initials($author)); ?>
+                                                <?php endif; ?>
+                                            </div>
+                                            <div class="grs-author-meta">
+                                                <div class="grs-name"><?php echo esc_html($author); ?></div>
+                                                <div class="grs-meta"><?php echo esc_html($date); ?></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="grs-stars grs-stars-row" title="<?php echo esc_attr(number_format_i18n($rating, 1)); ?> / 5"><?php echo wp_kses_post($this->star_html($rating)); ?></div>
+                                    <div class="grs-text"><?php echo esc_html($text !== '' ? $text : __('No comment text provided.', 'business-reviews-slider-widget')); ?></div>
+                                    <?php if ($showReadOnGoogle === '1' && $url !== '') : ?>
+                                        <a class="grs-read-google" href="<?php echo esc_url($url); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Read on Google', 'business-reviews-slider-widget'); ?></a>
+                                    <?php endif; ?>
+                                </article>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <div class="grs-dots" data-grs-dots></div>
+        </section>
+        <?php
+
+        return ob_get_clean();
+    }
+
+    public function render_trustpilot_shortcode(array $atts = []): string
+    {
+        $settings = get_option(self::SETTINGS_OPTION, []);
+        if (! isset($settings['enable_trustpilot']) || (int) $settings['enable_trustpilot'] !== 1) {
+            return '';
+        }
+
+        $cache = get_option(self::TRUSTPILOT_CACHE_OPTION, []);
+        $reviews = isset($cache['reviews']) && is_array($cache['reviews']) ? $cache['reviews'] : [];
+        $fetchedReviewCount = count($reviews);
+
+        $defaultTheme = isset($settings['trustpilot_theme']) ? (string) $settings['trustpilot_theme'] : 'dark';
+        $defaultLogoVariant = isset($settings['trustpilot_logo_variant']) ? (string) $settings['trustpilot_logo_variant'] : 'white';
+        $defaultAutoplay = isset($settings['trustpilot_autoplay_default']) ? (int) $settings['trustpilot_autoplay_default'] : 1;
+        $defaultInterval = isset($settings['trustpilot_autoplay_interval_default']) ? max(1500, min(20000, absint($settings['trustpilot_autoplay_interval_default']))) : 5500;
+        $defaultLoop = isset($settings['trustpilot_loop_infinite_default']) ? (int) $settings['trustpilot_loop_infinite_default'] : 0;
+        $defaultShowDots = isset($settings['trustpilot_show_dots_default']) ? (int) $settings['trustpilot_show_dots_default'] : 1;
+        $defaultSwipe = isset($settings['trustpilot_swipe_default']) ? (int) $settings['trustpilot_swipe_default'] : 1;
+        $defaultMobile = isset($settings['trustpilot_slides_mobile_default']) ? max(1, min(6, absint($settings['trustpilot_slides_mobile_default']))) : 1;
+        $defaultTablet = isset($settings['trustpilot_slides_tablet_default']) ? max(1, min(6, absint($settings['trustpilot_slides_tablet_default']))) : 2;
+        $defaultDesktop = isset($settings['trustpilot_slides_desktop_default']) ? max(1, min(6, absint($settings['trustpilot_slides_desktop_default']))) : 3;
+        $defaultDisplayLimit = isset($settings['trustpilot_display_limit_default']) ? max(0, min(500, absint($settings['trustpilot_display_limit_default']))) : 0;
+        $defaultShowSummary = isset($settings['trustpilot_show_summary_default']) ? (int) $settings['trustpilot_show_summary_default'] : 1;
+        $defaultShowTitles = isset($settings['trustpilot_show_titles_default']) ? (int) $settings['trustpilot_show_titles_default'] : 1;
+        $defaultMinRating = isset($settings['trustpilot_min_rating_default']) ? absint($settings['trustpilot_min_rating_default']) : 0;
+        $defaultShowNoComment = isset($settings['trustpilot_show_no_comment_default']) ? (int) $settings['trustpilot_show_no_comment_default'] : 1;
+        $defaultRatingMode = isset($settings['trustpilot_rating_mode_default']) ? (string) $settings['trustpilot_rating_mode_default'] : 'auto';
+        $defaultManualRating = isset($settings['trustpilot_manual_rating_default']) ? (float) $settings['trustpilot_manual_rating_default'] : 5;
+        $defaultReviewCountMode = isset($settings['trustpilot_review_count_mode']) ? (string) $settings['trustpilot_review_count_mode'] : 'fetched';
+        $defaultCustomReviewCount = isset($settings['trustpilot_custom_review_count']) ? absint($settings['trustpilot_custom_review_count']) : 0;
+        $defaultTitle = isset($settings['trustpilot_title_default']) && trim((string) $settings['trustpilot_title_default']) !== ''
+            ? (string) $settings['trustpilot_title_default']
+            : (string) __('Latest Trustpilot reviews', 'business-reviews-slider-widget');
+
+        $companyUrl = isset($cache['company_url']) ? trim((string) $cache['company_url']) : '';
+        $companyDomain = isset($cache['company_domain']) ? trim((string) $cache['company_domain']) : '';
+
+        $atts = shortcode_atts([
+            'theme' => $defaultTheme,
+            'logo_variant' => $defaultLogoVariant,
+            'limit' => (string) $defaultDisplayLimit,
+            'autoplay' => $defaultAutoplay,
+            'interval' => $defaultInterval,
+            'loop' => $defaultLoop,
+            'show_dots' => $defaultShowDots,
+            'swipe' => $defaultSwipe,
+            'mobile' => (string) $defaultMobile,
+            'tablet' => (string) $defaultTablet,
+            'desktop' => (string) $defaultDesktop,
+            'show_summary' => $defaultShowSummary,
+            'show_titles' => $defaultShowTitles,
+            'title' => $defaultTitle,
+            'min_rating' => (string) $defaultMinRating,
+            'show_no_comment' => (string) $defaultShowNoComment,
+            'rating_mode' => $defaultRatingMode,
+            'manual_rating' => (string) $defaultManualRating,
+            'review_count_mode' => $defaultReviewCountMode,
+            'custom_review_count' => (string) $defaultCustomReviewCount,
+        ], $atts, 'trustpilot_reviews_slider');
+
+        $theme = in_array($atts['theme'], ['dark', 'light'], true) ? $atts['theme'] : 'dark';
+        $logoVariant = in_array((string) $atts['logo_variant'], ['white', 'black'], true) ? (string) $atts['logo_variant'] : 'white';
+        $logoUrl = $logoVariant === 'black'
+            ? 'https://cdn.trustpilot.net/brand-assets/4.3.0/logo-black.svg'
+            : 'https://cdn.trustpilot.net/brand-assets/4.3.0/logo-white.svg';
+        $limit = absint((string) $atts['limit']);
+        $autoplay = (int) $atts['autoplay'] === 1 ? '1' : '0';
+        $interval = max(1500, min(20000, absint($atts['interval'])));
+        $loop = (int) $atts['loop'] === 1 ? '1' : '0';
+        $showDots = (int) $atts['show_dots'] === 1 ? '1' : '0';
+        $swipe = (int) $atts['swipe'] === 1 ? '1' : '0';
+        $mobileCols = max(1, min(6, absint((string) $atts['mobile'])));
+        $tabletCols = max(1, min(6, absint((string) $atts['tablet'])));
+        $desktopCols = max(1, min(6, absint((string) $atts['desktop'])));
+        $showSummary = (int) $atts['show_summary'] === 1 ? '1' : '0';
+        $showTitles = (int) $atts['show_titles'] === 1 ? '1' : '0';
+        $minRating = absint((string) $atts['min_rating']);
+        $minRating = in_array($minRating, [0, 2, 3, 4, 5], true) ? $minRating : 0;
+        $hideNoComment = (string) $atts['show_no_comment'] === '1';
+        $ratingMode = in_array((string) $atts['rating_mode'], ['auto', 'manual'], true) ? (string) $atts['rating_mode'] : 'auto';
+        $manualRating = max(0, min(5, (float) $atts['manual_rating']));
+        $reviewCountMode = in_array((string) $atts['review_count_mode'], ['fetched', 'custom'], true) ? (string) $atts['review_count_mode'] : 'fetched';
+        $customReviewCount = max(0, absint((string) $atts['custom_review_count']));
+
+        if ($hideNoComment) {
+            $reviews = array_values(array_filter($reviews, static function (array $review): bool {
+                $text = isset($review['text']) ? trim((string) $review['text']) : '';
+                $headline = isset($review['headline']) ? trim((string) $review['headline']) : '';
+                return $text !== '' || $headline !== '';
+            }));
+        }
+
+        if ($minRating > 0) {
+            $reviews = array_values(array_filter($reviews, static function (array $review) use ($minRating): bool {
+                $rating = isset($review['rating']) ? (float) $review['rating'] : 0;
+                return $rating >= $minRating;
+            }));
+        }
+
+        $reviews = $this->sort_reviews_newest_first($reviews);
+
+        if ($limit > 0) {
+            $reviews = array_slice($reviews, 0, min(100, $limit));
+        }
+
+        wp_enqueue_style('brsw-frontend-style');
+        wp_enqueue_script('brsw-frontend-script');
+
+        ob_start();
+        ?>
+        <section class="grs-slider-shell grs-theme-<?php echo esc_attr($theme); ?> grs-platform-trustpilot" data-grs-slider data-autoplay="<?php echo esc_attr($autoplay); ?>" data-interval="<?php echo esc_attr((string) $interval); ?>" data-loop="<?php echo esc_attr($loop); ?>" data-show-dots="<?php echo esc_attr($showDots); ?>" data-swipe="<?php echo esc_attr($swipe); ?>" data-mobile="<?php echo esc_attr((string) $mobileCols); ?>" data-tablet="<?php echo esc_attr((string) $tabletCols); ?>" data-desktop="<?php echo esc_attr((string) $desktopCols); ?>">
+            <?php if (! empty($reviews) && $showSummary === '1') :
+                $autoAvg = $this->trustpilot_bayesian_score($reviews);
+                $avg = $ratingMode === 'manual' ? $manualRating : $autoAvg;
+                $ratingLabel = $this->trustpilot_rating_label($avg);
+                $roundedSummaryRating = $this->trustpilot_rounded_rating($avg);
+                $headerReviewCount = $reviewCountMode === 'custom' && $customReviewCount > 0
+                    ? $customReviewCount
+                    : $fetchedReviewCount;
+                ?>
+                <div class="grs-header-score">
+                    <div class="grs-score-title"><?php echo esc_html($ratingLabel); ?></div>
+                    <div class="grs-score-stars grs-score-stars-tp">
+                        <?php /* translators: %s: Trustpilot rating value. */ ?>
+                        <img src="<?php echo esc_url($this->trustpilot_stars_asset_url($roundedSummaryRating)); ?>" alt="<?php echo esc_attr(sprintf(__('Trustpilot rating: %s/5', 'business-reviews-slider-widget'), number_format_i18n($roundedSummaryRating, 1))); ?>" loading="lazy" />
+                    </div>
+                    <div class="grs-score-meta">
+                        <?php
+                        echo esc_html(
+                            sprintf(
+                                /* translators: %d: Number of reviews. */
+                                _n('Based on %d review', 'Based on %d reviews', $headerReviewCount, 'business-reviews-slider-widget'),
+                                $headerReviewCount
+                            )
+                        );
+                        ?>
+                    </div>
+                    <?php if ($companyUrl !== '') : ?>
+                        <a class="grs-trustpilot-logo" href="<?php echo esc_url($companyUrl); ?>" target="_blank" rel="noopener noreferrer" aria-label="Trustpilot">
+                            <img src="<?php echo esc_url($logoUrl); ?>" alt="Trustpilot" loading="lazy" />
+                        </a>
+                    <?php else : ?>
+                        <div class="grs-trustpilot-logo" aria-label="Trustpilot"><?php echo esc_html($companyDomain !== '' ? $companyDomain : 'Trustpilot'); ?></div>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
+
+            <div class="grs-slider-top">
+                <div class="grs-slider-title"><?php echo esc_html((string) $atts['title']); ?></div>
+                <div class="grs-controls">
+                    <button class="grs-icon-btn" data-grs-prev aria-label="<?php esc_attr_e('Previous', 'business-reviews-slider-widget'); ?>">&#x2039;</button>
+                    <button class="grs-icon-btn" data-grs-next aria-label="<?php esc_attr_e('Next', 'business-reviews-slider-widget'); ?>">&#x203A;</button>
+                </div>
+            </div>
+
+            <div class="grs-slider" aria-live="polite">
+                <div class="grs-track" data-grs-track>
+                    <?php if (empty($reviews)) : ?>
+                        <div class="grs-slide">
+                            <article class="grs-card">
+                                <div class="grs-text"><?php esc_html_e('No reviews loaded yet.', 'business-reviews-slider-widget'); ?></div>
+                            </article>
+                        </div>
+                    <?php else : ?>
+                        <?php foreach ($reviews as $review) :
+                            $author = isset($review['author']) ? $review['author'] : __('Anonymous', 'business-reviews-slider-widget');
+                            $headline = isset($review['headline']) ? trim((string) $review['headline']) : '';
+                            $text = isset($review['text']) ? $review['text'] : '';
+                            $date = isset($review['date']) ? $this->format_date((string) $review['date']) : '';
+                            $rating = isset($review['rating']) ? (float) $review['rating'] : 0;
+                            $roundedCardRating = $this->trustpilot_rounded_rating($rating);
+                            $avatar = isset($review['avatar']) ? $review['avatar'] : '';
+                            ?>
+                            <div class="grs-slide">
+                                <article class="grs-card">
+                                    <div class="grs-card-top">
+                                        <div class="grs-author">
+                                            <div class="grs-avatar">
+                                                <?php if ($avatar !== '') : ?>
+                                                    <img src="<?php echo esc_url($avatar); ?>" alt="<?php echo esc_attr($author); ?>" loading="lazy" />
+                                                <?php else : ?>
+                                                    <?php echo esc_html($this->initials($author)); ?>
+                                                <?php endif; ?>
+                                            </div>
+                                            <div class="grs-author-meta">
+                                                <div class="grs-name"><?php echo esc_html($author); ?></div>
+                                                <div class="grs-meta"><?php echo esc_html($date); ?></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="grs-stars grs-stars-row grs-stars-tp" title="<?php echo esc_attr(number_format_i18n($roundedCardRating, 1)); ?> / 5">
+                                        <?php /* translators: %s: Trustpilot rating value. */ ?>
+                                        <img src="<?php echo esc_url($this->trustpilot_stars_asset_url($roundedCardRating)); ?>" alt="<?php echo esc_attr(sprintf(__('Trustpilot rating: %s/5', 'business-reviews-slider-widget'), number_format_i18n($roundedCardRating, 1))); ?>" loading="lazy" />
+                                    </div>
+                                    <?php if ($showTitles === '1') : ?>
+                                        <div class="grs-review-headline<?php echo $headline === '' ? ' is-empty' : ''; ?>"><?php echo esc_html($headline); ?></div>
+                                    <?php endif; ?>
+                                    <div class="grs-text"><?php echo esc_html($text !== '' ? $text : __('No comment text provided.', 'business-reviews-slider-widget')); ?></div>
+                                </article>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <div class="grs-dots" data-grs-dots></div>
+        </section>
+        <?php
+
+        return ob_get_clean();
+    }
+
+    private function star_html(float $rating): string
+    {
+        $r = max(0, min(5, $rating));
+        $full = (int) floor($r);
+        $fraction = $r - $full;
+        $half = $fraction >= 0.5 ? 1 : 0;
+        $empty = max(0, 5 - $full - $half);
+
+        $html = '<span class="grs-star-set">';
+        for ($i = 0; $i < $full; $i++) {
+            $html .= '<span class="grs-star is-full">★</span>';
+        }
+        if ($half === 1) {
+            $html .= '<span class="grs-star is-half">★</span>';
+        }
+        for ($i = 0; $i < $empty; $i++) {
+            $html .= '<span class="grs-star is-empty">★</span>';
+        }
+        $html .= '</span>';
+
+        return $html;
+    }
+
+    private function fetch_places_summary(string $placeId, string $apiKey): array
+    {
+        $placeId = trim($placeId);
+        $apiKey = trim($apiKey);
+
+        if ($placeId === '' || $apiKey === '') {
+            return [];
+        }
+
+        $endpoint = add_query_arg([
+            'place_id' => $placeId,
+            'fields'   => 'rating,user_ratings_total,url',
+            'key'      => $apiKey,
+        ], 'https://maps.googleapis.com/maps/api/place/details/json');
+
+        $response = wp_remote_get($endpoint, [
+            'timeout' => 30,
+        ]);
+
+        if (is_wp_error($response)) {
+            return [];
+        }
+
+        $statusCode = wp_remote_retrieve_response_code($response);
+        if ($statusCode < 200 || $statusCode >= 300) {
+            return [];
+        }
+
+        $data = json_decode(wp_remote_retrieve_body($response), true);
+        if (! is_array($data) || ! isset($data['result']) || ! is_array($data['result'])) {
+            return [];
+        }
+
+        $result = $data['result'];
+
+        return [
+            'rating'        => isset($result['rating']) ? max(0, min(5, (float) $result['rating'])) : 0,
+            'total_reviews' => isset($result['user_ratings_total']) ? absint($result['user_ratings_total']) : 0,
+            'url'           => isset($result['url']) ? esc_url_raw((string) $result['url']) : '',
+        ];
+    }
+
+    private function rating_label(float $rating): string
+    {
+        $r = max(0, min(5, $rating));
+
+        if ($r < 1.0) {
+            return (string) __('Very poor', 'business-reviews-slider-widget');
+        }
+
+        if ($r < 2.0) {
+            return (string) __('Poor', 'business-reviews-slider-widget');
+        }
+
+        if ($r < 3.0) {
+            return (string) __('Fair', 'business-reviews-slider-widget');
+        }
+
+        if ($r < 4.0) {
+            return (string) __('Good', 'business-reviews-slider-widget');
+        }
+
+        if ($r >= 4.5) {
+            return (string) __('Excellent', 'business-reviews-slider-widget');
+        }
+
+        return (string) __('Very good', 'business-reviews-slider-widget');
+    }
+
+    private function trustpilot_rounded_rating(float $rating): float
+    {
+        $r = max(1, min(5, $rating));
+
+        return floor($r * 2) / 2;
+    }
+
+    private function trustpilot_stars_asset_url(float $rating): string
+    {
+        $rounded = $this->trustpilot_rounded_rating($rating);
+        $token = rtrim(rtrim(number_format($rounded, 1, '.', ''), '0'), '.');
+
+        return 'https://cdn.trustpilot.net/brand-assets/4.1.0/stars/stars-' . $token . '.svg';
+    }
+
+    private function trustpilot_rating_label(float $rating): string
+    {
+        $r = max(1, min(5, $rating));
+
+        if ($r >= 4.3) {
+            return (string) __('Excellent', 'business-reviews-slider-widget');
+        }
+
+        if ($r >= 3.8) {
+            return (string) __('Great', 'business-reviews-slider-widget');
+        }
+
+        if ($r >= 2.8) {
+            return (string) __('Average', 'business-reviews-slider-widget');
+        }
+
+        if ($r >= 1.8) {
+            return (string) __('Poor', 'business-reviews-slider-widget');
+        }
+
+        return (string) __('Bad', 'business-reviews-slider-widget');
+    }
+
+    private function trustpilot_bayesian_score(array $reviews): float
+    {
+        $sum = 0.0;
+        $count = 0;
+
+        foreach ($reviews as $review) {
+            if (! is_array($review)) {
+                continue;
+            }
+
+            $rating = isset($review['rating']) ? (float) $review['rating'] : 0;
+            if ($rating <= 0) {
+                continue;
+            }
+
+            $sum += max(1, min(5, $rating));
+            $count++;
+        }
+
+        if ($count === 0) {
+            return 0;
+        }
+
+        // Trustpilot-like Bayesian prior: 7 hidden reviews at 3.5 stars.
+        $priorCount = 7;
+        $priorMean = 3.5;
+
+        return round((($sum + ($priorCount * $priorMean)) / ($count + $priorCount)), 1);
+    }
+
+    private function initials(string $name): string
+    {
+        $name = trim($name);
+        if ($name === '') {
+            return 'U';
+        }
+
+        $parts = preg_split('/\s+/', $name);
+        if (! is_array($parts)) {
+            return 'U';
+        }
+
+        $parts = array_slice($parts, 0, 2);
+        $result = '';
+
+        foreach ($parts as $part) {
+            $first = mb_substr($part, 0, 1);
+            $result .= mb_strtoupper($first);
+        }
+
+        return $result !== '' ? $result : 'U';
+    }
+
+    private function format_date(string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        $timestamp = strtotime($value);
+        if ($timestamp === false) {
+            return '';
+        }
+
+        return date_i18n(get_option('date_format'), $timestamp);
+    }
+
+    private function sort_reviews_newest_first(array $reviews): array
+    {
+        usort($reviews, function (array $a, array $b): int {
+            $ta = $this->review_timestamp($a);
+            $tb = $this->review_timestamp($b);
+
+            if ($ta === $tb) {
+                return 0;
+            }
+
+            return $ta > $tb ? -1 : 1;
+        });
+
+        return $reviews;
+    }
+
+    private function review_timestamp(array $review): int
+    {
+        $value = isset($review['date']) ? trim((string) $review['date']) : '';
+        if ($value === '') {
+            return 0;
+        }
+
+        $ts = strtotime($value);
+
+        return $ts === false ? 0 : (int) $ts;
+    }
+
+    private function extract_total_reviews(array $items, int $fallback): int
+    {
+        $keys = [
+            'reviewsCount',
+            'reviewCount',
+            'userReviewsCount',
+            'totalReviews',
+            'totalReviewCount',
+            'numberOfReviews',
+            'reviewsNumber',
+            'reviewsTotal',
+            'totalRatings',
+        ];
+
+        $stack = [$items];
+        $candidates = [];
+
+        while (! empty($stack)) {
+            $current = array_pop($stack);
+            if (! is_array($current)) {
+                continue;
+            }
+
+            foreach ($current as $key => $value) {
+                if (is_array($value)) {
+                    $stack[] = $value;
+                }
+
+                if (is_string($key) && in_array($key, $keys, true)) {
+                    $parsed = $this->to_positive_int($value);
+                    if ($parsed > 0) {
+                        $candidates[] = $parsed;
+                    }
+                }
+
+                if (is_string($key) && (is_string($value) || is_int($value) || is_float($value))) {
+                    $keyLower = strtolower($key);
+                    if (strpos($keyLower, 'review') !== false || strpos($keyLower, 'rating') !== false) {
+                        $parsed = $this->to_positive_int($value);
+                        if ($parsed > 0) {
+                            $candidates[] = $parsed;
+                        }
+                    }
+                }
+
+                if (is_string($value) && stripos($value, 'review') !== false) {
+                    $parsed = $this->to_positive_int($value);
+                    if ($parsed > 0) {
+                        $candidates[] = $parsed;
+                    }
+                }
+            }
+        }
+
+        if (empty($candidates)) {
+            return max(0, $fallback);
+        }
+
+        rsort($candidates, SORT_NUMERIC);
+
+        return max((int) $candidates[0], $fallback);
+    }
+
+    private function to_positive_int($value): int
+    {
+        if (is_int($value)) {
+            return max(0, $value);
+        }
+
+        if (is_float($value)) {
+            return max(0, (int) round($value));
+        }
+
+        if (is_string($value)) {
+            $lower = strtolower(trim($value));
+
+            if (preg_match('/([0-9]+(?:[.,][0-9]+)?)\s*([km])\b/', $lower, $kMatch) === 1) {
+                $base = (float) str_replace(',', '.', $kMatch[1]);
+                $mul = $kMatch[2] === 'm' ? 1000000 : 1000;
+
+                return max(0, (int) round($base * $mul));
+            }
+
+            if (preg_match_all('/[0-9]+(?:[.,][0-9]+)*/', $lower, $matches) !== 1 || empty($matches[0])) {
+                return 0;
+            }
+
+            $candidates = [];
+            foreach ($matches[0] as $token) {
+                $token = str_replace(' ', '', $token);
+
+                if (strpos($token, ',') !== false && strpos($token, '.') === false) {
+                    $token = str_replace(',', '', $token);
+                } elseif (strpos($token, '.') !== false && strpos($token, ',') !== false) {
+                    $token = str_replace([',', '.'], '', $token);
+                } elseif (strpos($token, '.') !== false) {
+                    $parts = explode('.', $token);
+                    if (count($parts) === 2 && strlen($parts[1]) <= 2) {
+                        $candidates[] = (int) round((float) $token);
+                        continue;
+                    }
+                    $token = str_replace('.', '', $token);
+                }
+
+                if (ctype_digit($token)) {
+                    $candidates[] = (int) $token;
+                }
+            }
+
+            if (empty($candidates)) {
+                return 0;
+            }
+
+            rsort($candidates, SORT_NUMERIC);
+
+            return max(0, (int) $candidates[0]);
+        }
+
+        return 0;
+    }
+
+    private function extract_avatar_url(array $item): string
+    {
+        $keys = [
+            'reviewerPhotoUrl',
+            'reviewerPhoto',
+            'profilePhotoUrl',
+            'userImage',
+            'authorImageUrl',
+            'reviewerProfilePhotoUrl',
+            'reviewerImageUrl',
+            'reviewerAvatarUrl',
+            'profilePictureUrl',
+            'profileImageUrl',
+        ];
+
+        foreach ($keys as $key) {
+            if (! array_key_exists($key, $item)) {
+                continue;
+            }
+
+            $value = $item[$key];
+
+            if (is_string($value)) {
+                return $this->normalise_url($value);
+            }
+
+            if (is_array($value)) {
+                foreach ($value as $candidate) {
+                    if (is_string($candidate) && $candidate !== '') {
+                        return $this->normalise_url($candidate);
+                    }
+                }
+            }
+        }
+
+        foreach ($item as $key => $value) {
+            if (! is_string($key) || (! is_string($value))) {
+                continue;
+            }
+
+            $keyLower = strtolower($key);
+            if (strpos($keyLower, 'photo') === false && strpos($keyLower, 'avatar') === false && strpos($keyLower, 'image') === false) {
+                continue;
+            }
+
+            if ($value !== '') {
+                return $this->normalise_url($value);
+            }
+        }
+
+        return '';
+    }
+
+    private function normalise_url(string $url): string
+    {
+        $url = trim($url);
+        if ($url === '') {
+            return '';
+        }
+
+        if (strpos($url, '//') === 0) {
+            $url = 'https:' . $url;
+        }
+
+        return esc_url_raw($url);
+    }
+}
+
+register_deactivation_hook(__FILE__, ['BRSW_Business_Reviews_Slider_Widget', 'deactivate']);
+new BRSW_Business_Reviews_Slider_Widget();

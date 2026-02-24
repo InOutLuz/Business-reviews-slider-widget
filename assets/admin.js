@@ -2,8 +2,12 @@
   const fetchButtons = Array.from(document.querySelectorAll('.grs-fetch-btn[data-grs-fetch-scope]'));
   const enableGoogle = document.getElementById('grs_enable_google');
   const enableTrustpilot = document.getElementById('grs_enable_trustpilot');
+  const googleRatingMode = document.getElementById('grs_rating_mode_default');
+  const googleReviewCountMode = document.getElementById('grs_review_count_mode');
+  const trustpilotRatingMode = document.getElementById('grs_trustpilot_rating_mode_default');
+  const trustpilotReviewCountMode = document.getElementById('grs_trustpilot_review_count_mode');
 
-  const toggleRow = (inputId, enabled) => {
+  const toggleRow = (inputId, enabled, visible = true) => {
     const input = document.getElementById(inputId);
     if (!input) {
       return;
@@ -19,6 +23,12 @@
       row.classList.remove('grs-row-disabled');
     } else {
       row.classList.add('grs-row-disabled');
+    }
+
+    if (visible) {
+      row.classList.remove('grs-row-hidden');
+    } else {
+      row.classList.add('grs-row-hidden');
     }
   };
 
@@ -38,7 +48,6 @@
       'grs_show_summary_default',
       'grs_show_read_on_google_default',
       'grs_rating_mode_default',
-      'grs_manual_rating_default',
       'grs_display_limit_default',
       'grs_min_rating_default',
       'grs_review_count_mode',
@@ -65,10 +74,19 @@
       'grs_trustpilot_show_no_comment_default',
       'grs_trustpilot_min_rating_default',
       'grs_trustpilot_rating_mode_default',
-      'grs_trustpilot_manual_rating_default',
       'grs_trustpilot_review_count_mode',
       'grs_trustpilot_custom_review_count'
     ].forEach((id) => toggleRow(id, trustpilotOn));
+
+    const googleManualOn = googleOn && !!googleRatingMode && googleRatingMode.value === 'manual';
+    const googleCustomCountOn = googleOn && !!googleReviewCountMode && googleReviewCountMode.value === 'custom';
+    const trustpilotManualOn = trustpilotOn && !!trustpilotRatingMode && trustpilotRatingMode.value === 'manual';
+    const trustpilotCustomCountOn = trustpilotOn && !!trustpilotReviewCountMode && trustpilotReviewCountMode.value === 'custom';
+
+    toggleRow('grs_manual_rating_default', googleManualOn, googleManualOn);
+    toggleRow('grs_custom_review_count', googleCustomCountOn, googleCustomCountOn);
+    toggleRow('grs_trustpilot_manual_rating_default', trustpilotManualOn, trustpilotManualOn);
+    toggleRow('grs_trustpilot_custom_review_count', trustpilotCustomCountOn, trustpilotCustomCountOn);
   };
 
   if (enableGoogle || enableTrustpilot) {
@@ -78,6 +96,18 @@
     }
     if (enableTrustpilot) {
       enableTrustpilot.addEventListener('change', applyPlatformState);
+    }
+    if (googleRatingMode) {
+      googleRatingMode.addEventListener('change', applyPlatformState);
+    }
+    if (googleReviewCountMode) {
+      googleReviewCountMode.addEventListener('change', applyPlatformState);
+    }
+    if (trustpilotRatingMode) {
+      trustpilotRatingMode.addEventListener('change', applyPlatformState);
+    }
+    if (trustpilotReviewCountMode) {
+      trustpilotReviewCountMode.addEventListener('change', applyPlatformState);
     }
   }
 

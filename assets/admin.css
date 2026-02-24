@@ -98,3 +98,7 @@
 .grs-row-disabled {
     opacity: 0.48;
 }
+
+.grs-row-hidden {
+    display: none !important;
+}

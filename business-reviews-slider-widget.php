@@ -75,7 +75,7 @@ class BRSW_Business_Reviews_Slider_Widget
                 'trustpilot_max_reviews' => 0,
                 'language'    => 'en',
                 'theme'       => 'dark',
-                'show_no_comment' => 1,
+                'show_no_comment' => 0,
                 'autoplay_default' => 1,
                 'autoplay_interval_default' => 5500,
                 'cron_enabled' => 0,
@@ -104,7 +104,7 @@ class BRSW_Business_Reviews_Slider_Widget
                 'trustpilot_display_limit_default' => 0,
                 'trustpilot_show_summary_default' => 1,
                 'trustpilot_show_titles_default' => 1,
-                'trustpilot_show_no_comment_default' => 1,
+                'trustpilot_show_no_comment_default' => 0,
                 'trustpilot_min_rating_default' => 0,
                 'trustpilot_rating_mode_default' => 'auto',
                 'trustpilot_manual_rating_default' => 5,
@@ -190,7 +190,7 @@ class BRSW_Business_Reviews_Slider_Widget
         if ($tpDisplayLimitRaw === '') {
             $output['trustpilot_display_limit_default'] = 0;
         } else {
-            $output['trustpilot_display_limit_default'] = max(1, min(500, absint($tpDisplayLimitRaw)));
+            $output['trustpilot_display_limit_default'] = max(6, min(500, absint($tpDisplayLimitRaw)));
         }
 
         $tpMinRating = isset($input['trustpilot_min_rating_default']) ? absint($input['trustpilot_min_rating_default']) : 0;
@@ -198,7 +198,7 @@ class BRSW_Business_Reviews_Slider_Widget
 
         $tpRatingMode = isset($input['trustpilot_rating_mode_default']) ? sanitize_key($input['trustpilot_rating_mode_default']) : 'auto';
         $output['trustpilot_rating_mode_default'] = in_array($tpRatingMode, ['auto', 'manual'], true) ? $tpRatingMode : 'auto';
-        $output['trustpilot_manual_rating_default'] = isset($input['trustpilot_manual_rating_default']) ? max(0, min(5, (float) $input['trustpilot_manual_rating_default'])) : 5;
+        $output['trustpilot_manual_rating_default'] = isset($input['trustpilot_manual_rating_default']) ? max(1, min(5, (float) $input['trustpilot_manual_rating_default'])) : 5;
 
         $tpReviewCountMode = isset($input['trustpilot_review_count_mode']) ? sanitize_key($input['trustpilot_review_count_mode']) : 'fetched';
         $output['trustpilot_review_count_mode'] = in_array($tpReviewCountMode, ['fetched', 'custom'], true) ? $tpReviewCountMode : 'fetched';
@@ -358,6 +358,11 @@ class BRSW_Business_Reviews_Slider_Widget
                                     <td>
                                         <input id="grs_token" type="password" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[token]" class="regular-text" value="<?php echo esc_attr($settings['token'] ?? ''); ?>" placeholder="apify_api_..." />
                                         <p class="description"><?php esc_html_e('Apify API is used to fetch the reviews. It has a pretty generous free tier 1000 reviews+. Just register an account, create/copy your API token, and paste it here.', 'business-reviews-slider-widget'); ?></p>
+                                        <p class="description">
+                                            <a href="<?php echo esc_url('https://apify.com'); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Apify', 'business-reviews-slider-widget'); ?></a>
+                                            &nbsp;|&nbsp;
+                                            <a href="<?php echo esc_url('https://console.apify.com/settings/integrations'); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Get your API key here', 'business-reviews-slider-widget'); ?></a>
+                                        </p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
@@ -453,18 +458,19 @@ class BRSW_Business_Reviews_Slider_Widget
                                     <th scope="row"><label for="grs_language"><?php esc_html_e('Language', 'business-reviews-slider-widget'); ?></label></th>
                                     <td><input id="grs_language" type="text" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[language]" value="<?php echo esc_attr($settings['language'] ?? 'en'); ?>" class="small-text" /></td>
                                 </tr>
+                                
                                 <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
                                     <th scope="row"><label for="grs_trustpilot_domain"><?php esc_html_e('Trustpilot company domain', 'business-reviews-slider-widget'); ?></label></th>
                                     <td>
                                         <input id="grs_trustpilot_domain" type="text" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_domain]" class="regular-text" value="<?php echo esc_attr($settings['trustpilot_domain'] ?? ''); ?>" placeholder="example.com" />
-                                        <p class="description"><?php esc_html_e('Used to find the company on Trustpilot', 'business-reviews-slider-widget'); ?></p>
+                                        <p class="description"><?php esc_html_e('Used to identify the company page on Trustpilot', 'business-reviews-slider-widget'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
                                     <th scope="row"><label for="grs_trustpilot_max_reviews"><?php esc_html_e('Trustpilot max reviews', 'business-reviews-slider-widget'); ?></label></th>
                                     <td>
                                         <input id="grs_trustpilot_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_max_reviews]" value="<?php echo esc_attr((string) (($settings['trustpilot_max_reviews'] ?? 0) === 0 ? '' : ($settings['trustpilot_max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'business-reviews-slider-widget'); ?>" />
-                                        <p class="description"><?php esc_html_e('Leave empty to fetch all reviews', 'business-reviews-slider-widget'); ?></p>
+                                        <p class="description"><?php esc_html_e('Leave empty to fetch all available reviews (can consume more Apify credits).', 'business-reviews-slider-widget'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
@@ -645,6 +651,7 @@ class BRSW_Business_Reviews_Slider_Widget
                                             <option value="fetched" <?php selected(($settings['review_count_mode'] ?? 'fetched'), 'fetched'); ?>><?php esc_html_e('Use fetched reviews count', 'business-reviews-slider-widget'); ?></option>
                                             <option value="custom" <?php selected(($settings['review_count_mode'] ?? ''), 'custom'); ?>><?php esc_html_e('Use custom count', 'business-reviews-slider-widget'); ?></option>
                                         </select>
+                                        <p class="description"><?php esc_html_e('The total reviews count.', 'business-reviews-slider-widget'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
@@ -737,7 +744,8 @@ class BRSW_Business_Reviews_Slider_Widget
                                 <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
                                     <th scope="row"><label for="grs_trustpilot_display_limit_default"><?php esc_html_e('Reviews to display', 'business-reviews-slider-widget'); ?></label></th>
                                     <td>
-                                        <input id="grs_trustpilot_display_limit_default" type="number" min="1" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_display_limit_default]" value="<?php echo esc_attr((string) (($settings['trustpilot_display_limit_default'] ?? 0) === 0 ? '' : ($settings['trustpilot_display_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'business-reviews-slider-widget'); ?>" />
+                                        <input id="grs_trustpilot_display_limit_default" type="number" min="6" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_display_limit_default]" value="<?php echo esc_attr((string) (($settings['trustpilot_display_limit_default'] ?? 0) === 0 ? '' : ($settings['trustpilot_display_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'business-reviews-slider-widget'); ?>" />
+                                        <p class="description"><?php esc_html_e('Frontend only: limit shown reviews. Leave empty to show all fetched reviews. Minimum when set: 6. Applied after filters (no-comment/rating).', 'business-reviews-slider-widget'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
@@ -771,6 +779,7 @@ class BRSW_Business_Reviews_Slider_Widget
                                             <option value="fetched" <?php selected(($settings['trustpilot_review_count_mode'] ?? 'fetched'), 'fetched'); ?>><?php esc_html_e('Use fetched reviews count', 'business-reviews-slider-widget'); ?></option>
                                             <option value="custom" <?php selected(($settings['trustpilot_review_count_mode'] ?? ''), 'custom'); ?>><?php esc_html_e('Use custom count', 'business-reviews-slider-widget'); ?></option>
                                         </select>
+                                        <p class="description"><?php esc_html_e('The total reviews count.', 'business-reviews-slider-widget'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
@@ -791,9 +800,9 @@ class BRSW_Business_Reviews_Slider_Widget
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_trustpilot_manual_rating_default"><?php esc_html_e('Star manual rating (0-5)', 'business-reviews-slider-widget'); ?></label></th>
+                                    <th scope="row"><label for="grs_trustpilot_manual_rating_default"><?php esc_html_e('Star manual rating (1-5)', 'business-reviews-slider-widget'); ?></label></th>
                                     <td>
-                                        <input id="grs_trustpilot_manual_rating_default" type="number" min="0" max="5" step="0.1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_manual_rating_default]" value="<?php echo esc_attr((string) ($settings['trustpilot_manual_rating_default'] ?? 5)); ?>" />
+                                        <input id="grs_trustpilot_manual_rating_default" type="number" min="1" max="5" step="0.1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_manual_rating_default]" value="<?php echo esc_attr((string) ($settings['trustpilot_manual_rating_default'] ?? 5)); ?>" />
                                         <p class="description"><?php esc_html_e('Used when Star rating source is set to Manual.', 'business-reviews-slider-widget'); ?></p>
                                     </td>
                                 </tr>
@@ -1026,7 +1035,7 @@ class BRSW_Business_Reviews_Slider_Widget
             return [
                 'success' => false,
                 'status'  => 400,
-                'message' => (string) __('Provide Place ID or Google Maps URL.', 'business-reviews-slider-widget'),
+                'message' => (string) __('Provide Place ID or Google Maps URL under Google settings.', 'business-reviews-slider-widget'),
             ];
         }
 
@@ -1120,7 +1129,7 @@ class BRSW_Business_Reviews_Slider_Widget
             return [
                 'success' => false,
                 'status'  => 400,
-                'message' => (string) __('Add Trustpilot company domain in settings.', 'business-reviews-slider-widget'),
+                'message' => (string) __('Add Trustpilot company domain in Trustpilot settings.', 'business-reviews-slider-widget'),
             ];
         }
 
@@ -1696,7 +1705,7 @@ class BRSW_Business_Reviews_Slider_Widget
         $minRating = in_array($minRating, [0, 2, 3, 4, 5], true) ? $minRating : 0;
         $hideNoComment = (string) $atts['show_no_comment'] === '1';
         $ratingMode = in_array((string) $atts['rating_mode'], ['auto', 'manual'], true) ? (string) $atts['rating_mode'] : 'auto';
-        $manualRating = max(0, min(5, (float) $atts['manual_rating']));
+        $manualRating = max(1, min(5, (float) $atts['manual_rating']));
         $reviewCountMode = in_array((string) $atts['review_count_mode'], ['fetched', 'custom'], true) ? (string) $atts['review_count_mode'] : 'fetched';
         $customReviewCount = max(0, absint((string) $atts['custom_review_count']));
 
@@ -1924,7 +1933,7 @@ class BRSW_Business_Reviews_Slider_Widget
     {
         $r = max(1, min(5, $rating));
 
-        return floor($r * 2) / 2;
+        return round($r * 2) / 2;
     }
 
     private function trustpilot_stars_asset_url(float $rating): string

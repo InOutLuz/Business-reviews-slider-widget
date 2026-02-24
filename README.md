@@ -16,6 +16,21 @@ By [Dope Studio](https://profiles.wordpress.org/dopestudio)
 
 Business Reviews Slider Widget is a WordPress plugin that fetches and displays customer reviews in responsive sliders.
 
+- **Display unlimited Google and Trustpilot reviews for free**  
+No artificial caps, no paid tiers just to show more reviews. Fetch hundreds or thousands and display as many as you want.
+
+- **Beautiful, responsive review sliders out of the box**  
+Modern, clean sliders with swipe, autoplay, dots and per-device layouts, no page builders or extra styling plugins needed.
+
+- **Automatic syncing or manual control, your choice**  
+Fetch reviews on demand or keep them fresh automatically with scheduled updates via WP-Cron.
+
+- **Full control over what appears on your site**  
+Filter by rating, hide textless reviews, limit displayed cards, customise titles, ratings and review counts per platform.
+
+- **Built for performance, not bloat**  
+Reviews are cached in WordPress, not fetched on every page load, fast frontend output with simple shortcodes.
+
 This plugin uses third-party services to fetch and enrich review data:
 - Apify (Google and Trustpilot review fetching)
 - Google Places API (optional, for Google summary enrichment)

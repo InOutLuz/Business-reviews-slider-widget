@@ -1,4 +1,4 @@
-=== Business Reviews Slider Widget ===
+=== Dope Studio Business Reviews Slider ===
 Contributors: dopestudio
 Tags: reviews, google reviews, trustpilot, slider
 Requires at least: 6.0
@@ -14,7 +14,7 @@ Google and Trustpilot review sliders with manual and scheduled fetching.
 
 By [Dope Studio](https://profiles.wordpress.org/dopestudio)
 
-Business Reviews Slider Widget is a WordPress plugin that fetches and displays customer reviews in responsive sliders.
+Dope Studio Business Reviews Slider is a WordPress plugin that fetches and displays customer reviews in responsive sliders.
 
 - **Display unlimited Google and Trustpilot reviews for free**  
 No artificial caps, no paid tiers just to show more reviews. Fetch hundreds or thousands and display as many as you want.
@@ -38,6 +38,24 @@ This plugin uses third-party services to fetch and enrich review data:
 Apify free tier allows 1000+ reviews to be fetched per month.
 
 The plugin stores fetched data in WordPress options and renders the frontend using shortcodes.
+
+== External services ==
+
+This plugin connects to third-party services to fetch review data and optional rating summary data.
+
+1) Apify (review fetching)
+- Purpose: fetches Google and Trustpilot reviews.
+- When data is sent: only when you manually run a fetch from wp-admin or when scheduled WP-Cron fetching runs.
+- Data sent: Apify API token, target source values you configure (Google Place ID and/or Google Maps URL, Trustpilot domain), selected language, and max review limits.
+- Terms: https://apify.com/terms
+- Privacy policy: https://apify.com/privacy
+
+2) Google Places API (optional summary enrichment)
+- Purpose: retrieves Google place summary fields (for example rating and rating count) when optional Places summary mode is enabled.
+- When data is sent: during Google fetch operations, only if Places summary mode is enabled and a Places API key is configured.
+- Data sent: Google Places API key and Google Place ID.
+- Terms: https://cloud.google.com/maps-platform/terms
+- Privacy policy: https://policies.google.com/privacy
 
 ---
 
@@ -93,15 +111,14 @@ Optional:
 ## 3) Installation
 
 1. Place plugin folder in `wp-content/plugins/`.
-2. Ensure main plugin file is:
-   - `business-reviews-slider-widget.php`
-3. Activate **Business Reviews Slider Widget** from WordPress Admin → Plugins.
+2. Ensure the main plugin file is in the plugin root directory.
+3. Activate **Dope Studio Business Reviews Slider** from WordPress Admin → Plugins.
 
 ---
 
 ## 4) Quick Start
 
-1. Open **Business Reviews Slider Widget** admin page.
+1. Open **Dope Studio Business Reviews Slider** admin page.
 2. Add your **Apify token**.
 3. Enable one or more platforms.
 4. Configure source settings:
@@ -112,8 +129,8 @@ Optional:
    - Fetch Google reviews
    - Fetch Trustpilot reviews
 6. Add shortcode to page/post:
-   - `[google_reviews_slider]`
-   - `[trustpilot_reviews_slider]`
+   - `[dsbrs_google_reviews_slider]`
+   - `[dsbrs_trustpilot_reviews_slider]`
 
 ---
 
@@ -167,7 +184,7 @@ Optional:
 ## 6) Shortcodes
 
 ## Google
-`[google_reviews_slider]`
+`[dsbrs_google_reviews_slider]`
 
 Common attributes:
 - `theme="dark|light"`
@@ -188,7 +205,7 @@ Common attributes:
 - `show_no_comment="1"` (hide ratings-only textless reviews)
 
 ## Trustpilot
-`[trustpilot_reviews_slider]`
+`[dsbrs_trustpilot_reviews_slider]`
 
 Common attributes:
 - `theme="dark|light"`
@@ -231,9 +248,9 @@ Notes:
 The plugin stores settings and cached review data in WordPress options.
 
 Current option keys:
-- `brsw_settings`
-- `brsw_reviews_cache`
-- `brsw_trustpilot_reviews_cache`
+- `dsbrs_settings`
+- `dsbrs_reviews_cache`
+- `dsbrs_trustpilot_reviews_cache`
 
 ---
 
@@ -278,7 +295,7 @@ Current option keys:
 - Initial release with Google + Trustpilot review slider
 - Admin fetch and cron automation
 - Per-platform slider settings
-- Rebrand to Business Reviews Slider Widget
+- Rebrand to Dope Studio Business Reviews Slider
 
 ---
 

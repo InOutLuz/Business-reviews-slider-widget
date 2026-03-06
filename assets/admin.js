@@ -111,7 +111,7 @@
     }
   }
 
-  if (!fetchButtons.length || typeof brswAdmin === 'undefined') {
+  if (!fetchButtons.length || typeof dsbrsAdmin === 'undefined') {
     return;
   }
 
@@ -136,11 +136,11 @@
 
       try {
         const formData = new FormData();
-        formData.append('action', brswAdmin.action);
-        formData.append('nonce', brswAdmin.nonce);
+        formData.append('action', dsbrsAdmin.action);
+        formData.append('nonce', dsbrsAdmin.nonce);
         formData.append('scope', scope);
 
-        const response = await fetch(brswAdmin.ajaxUrl, {
+        const response = await fetch(dsbrsAdmin.ajaxUrl, {
           method: 'POST',
           body: formData,
           credentials: 'same-origin'

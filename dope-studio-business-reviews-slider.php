@@ -85,6 +85,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                 'cron_frequency' => 'weekly',
                 'cron_time' => '03:00',
                 'cron_fetch_scope' => 'enabled',
+                'delete_on_uninstall' => 0,
                 'loop_infinite_default' => 0,
                 'show_dots_default' => 1,
                 'swipe_default' => 1,
@@ -168,6 +169,7 @@ class DSBRS_Business_Reviews_Slider_Widget
 
         $cronFetchScope = isset($input['cron_fetch_scope']) ? sanitize_key((string) $input['cron_fetch_scope']) : 'enabled';
         $output['cron_fetch_scope'] = in_array($cronFetchScope, ['enabled', 'all', 'google', 'trustpilot'], true) ? $cronFetchScope : 'enabled';
+        $output['delete_on_uninstall'] = isset($input['delete_on_uninstall']) ? 1 : 0;
 
         $output['loop_infinite_default'] = isset($input['loop_infinite_default']) ? 1 : 0;
         $output['show_dots_default'] = isset($input['show_dots_default']) ? 1 : 0;
@@ -560,6 +562,16 @@ class DSBRS_Business_Reviews_Slider_Widget
                                             <option value="google" <?php selected(($settings['cron_fetch_scope'] ?? 'enabled'), 'google'); ?>><?php esc_html_e('Fetch only Google', 'dope-studio-business-reviews-slider'); ?></option>
                                             <option value="trustpilot" <?php selected(($settings['cron_fetch_scope'] ?? 'enabled'), 'trustpilot'); ?>><?php esc_html_e('Fetch only Trustpilot', 'dope-studio-business-reviews-slider'); ?></option>
                                         </select>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Data cleanup', 'dope-studio-business-reviews-slider'); ?></th>
+                                    <td>
+                                        <label for="grs_delete_on_uninstall">
+                                            <input id="grs_delete_on_uninstall" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[delete_on_uninstall]" value="1" <?php checked((int) ($settings['delete_on_uninstall'] ?? 0), 1); ?> />
+                                            <?php esc_html_e('Delete all plugin data when uninstalling the plugin', 'dope-studio-business-reviews-slider'); ?>
+                                        </label>
+                                        <p class="description"><?php esc_html_e('Keep this unchecked if you want to keep fetched reviews in the database.', 'dope-studio-business-reviews-slider'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>

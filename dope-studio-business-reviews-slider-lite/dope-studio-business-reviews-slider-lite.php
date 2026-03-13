@@ -90,6 +90,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
                     'cron_frequency' => 'weekly',
                     'cron_time' => '03:00',
                     'cron_fetch_scope' => 'enabled',
+                    'delete_on_uninstall' => 0,
                 ],
             ]
         );
@@ -168,6 +169,8 @@ class DSBRSL_Google_Reviews_Slider_Lite
 
         $cronFetchScope = isset($input['cron_fetch_scope']) ? sanitize_key((string) $input['cron_fetch_scope']) : 'enabled';
         $output['cron_fetch_scope'] = in_array($cronFetchScope, ['enabled', 'all', 'google'], true) ? $cronFetchScope : 'enabled';
+
+        $output['delete_on_uninstall'] = isset($input['delete_on_uninstall']) ? 1 : 0;
 
         return $output;
     }
@@ -455,6 +458,17 @@ class DSBRSL_Google_Reviews_Slider_Lite
                                             <option value="all" <?php selected(($settings['cron_fetch_scope'] ?? 'enabled'), 'all'); ?>><?php esc_html_e('Fetch all (Google)', 'dope-studio-business-reviews-slider-lite'); ?></option>
                                             <option value="google" <?php selected(($settings['cron_fetch_scope'] ?? 'enabled'), 'google'); ?>><?php esc_html_e('Fetch only Google', 'dope-studio-business-reviews-slider-lite'); ?></option>
                                         </select>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Data cleanup', 'dope-studio-business-reviews-slider-lite'); ?></th>
+                                    <td>
+                                        <label for="grs_delete_on_uninstall">
+                                            <input id="grs_delete_on_uninstall" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[delete_on_uninstall]" value="1" <?php checked((int) ($settings['delete_on_uninstall'] ?? 0), 1); ?> />
+                                            <?php esc_html_e('Delete all plugin data when uninstalling the plugin', 'dope-studio-business-reviews-slider-lite'); ?>
+                                        </label>
+                                        <p class="description"><?php esc_html_e('Default is OFF (unchecked). Keep this OFF if you plan to migrate to Pro, so your Lite settings and cached reviews remain available for import.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                                        <p class="description"><?php esc_html_e('If enabled, Lite settings and cached reviews will be removed when you uninstall the plugin.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>

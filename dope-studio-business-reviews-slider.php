@@ -853,6 +853,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                     <p><code>[dsbrs_google_reviews_slider]</code></p>
                     <p><code>[dsbrs_trustpilot_reviews_slider]</code></p>
                     <p><?php esc_html_e('Optional attributes:', 'dope-studio-business-reviews-slider'); ?> <code>theme="dark|light" limit="0" autoplay="1" interval="5500" loop="0|1" show_dots="0|1" swipe="0|1" mobile="1-6" tablet="1-6" desktop="1-6" show_summary="0|1" show_read_on_google="0|1" rating_mode="auto|manual" manual_rating="0-5" min_rating="0|2|3|4|5" show_no_comment="1"</code></p>
+                    <p class="description"><?php esc_html_e('These attributes are optional. If you configure settings in the admin panel, use the default shortcode(s) without attributes and those settings will be applied automatically.', 'dope-studio-business-reviews-slider'); ?></p>
                     <p class="description"><?php esc_html_e('show_no_comment="1" hides ratings-only reviews without text comments.', 'dope-studio-business-reviews-slider'); ?></p>
                 </div>
             </div>

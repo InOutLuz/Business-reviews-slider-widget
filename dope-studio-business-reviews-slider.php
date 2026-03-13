@@ -35,6 +35,7 @@ class DSBRS_Business_Reviews_Slider_Widget
 
         add_action('wp_ajax_' . self::AJAX_ACTION, [$this, 'ajax_fetch_reviews']);
         add_action(self::CRON_HOOK, [$this, 'run_scheduled_fetch']);
+        add_action('admin_post_dsbrs_import_lite_data', [$this, 'handle_import_lite_data']);
         add_action('update_option_' . self::SETTINGS_OPTION, [$this, 'on_settings_updated'], 10, 2);
         add_filter('cron_schedules', [$this, 'register_cron_schedules']);
 
@@ -325,10 +326,19 @@ class DSBRS_Business_Reviews_Slider_Widget
             'page' => 'dsbrs-dope-studio-business-reviews-slider',
             'tab'  => 'trustpilot',
         ], admin_url('admin.php')), 'dsbrs_admin_tab');
+        $importStatus = sanitize_key((string) filter_input(INPUT_GET, 'import_lite', FILTER_UNSAFE_RAW));
         ?>
         <div class="wrap grs-wrap">
             <h1><?php esc_html_e('Dope Studio Business Reviews Slider', 'dope-studio-business-reviews-slider'); ?></h1>
             <p><?php esc_html_e('Fetch reviews, and use shortcode on the frontend.', 'dope-studio-business-reviews-slider'); ?></p>
+
+            <?php if ($importStatus === 'success') : ?>
+                <div class="notice notice-success is-dismissible"><p><?php esc_html_e('Lite data imported successfully. Google settings and cache are now available in Pro.', 'dope-studio-business-reviews-slider'); ?></p></div>
+            <?php elseif ($importStatus === 'none') : ?>
+                <div class="notice notice-warning is-dismissible"><p><?php esc_html_e('No Lite data found to import.', 'dope-studio-business-reviews-slider'); ?></p></div>
+            <?php elseif ($importStatus === 'failed') : ?>
+                <div class="notice notice-error is-dismissible"><p><?php esc_html_e('Could not import Lite data.', 'dope-studio-business-reviews-slider'); ?></p></div>
+            <?php endif; ?>
 
             <div class="grs-cards">
                 <div class="grs-card">
@@ -855,6 +865,16 @@ class DSBRS_Business_Reviews_Slider_Widget
                     <p><?php esc_html_e('Optional attributes:', 'dope-studio-business-reviews-slider'); ?> <code>theme="dark|light" limit="0" autoplay="1" interval="5500" loop="0|1" show_dots="0|1" swipe="0|1" mobile="1-6" tablet="1-6" desktop="1-6" show_summary="0|1" show_read_on_google="0|1" rating_mode="auto|manual" manual_rating="0-5" min_rating="0|2|3|4|5" show_no_comment="1"</code></p>
                     <p class="description"><?php esc_html_e('These attributes are optional. If you configure settings in the admin panel, use the default shortcode(s) without attributes and those settings will be applied automatically.', 'dope-studio-business-reviews-slider'); ?></p>
                     <p class="description"><?php esc_html_e('show_no_comment="1" hides ratings-only reviews without text comments.', 'dope-studio-business-reviews-slider'); ?></p>
+
+                    <hr />
+
+                    <h3><?php esc_html_e('Import from Lite', 'dope-studio-business-reviews-slider'); ?></h3>
+                    <p class="description"><?php esc_html_e('Import Google settings and cached reviews from Dope Studio Business Reviews Slider Lite.', 'dope-studio-business-reviews-slider'); ?></p>
+                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                        <input type="hidden" name="action" value="dsbrs_import_lite_data" />
+                        <?php wp_nonce_field('dsbrs_import_lite_data', 'dsbrs_import_lite_nonce'); ?>
+                        <button type="submit" class="button button-secondary"><?php esc_html_e('Import Lite Data', 'dope-studio-business-reviews-slider'); ?></button>
+                    </form>
                 </div>
             </div>
         </div>
@@ -893,6 +913,102 @@ class DSBRS_Business_Reviews_Slider_Widget
             'count' => (int) $result['count'],
             'total' => (int) $result['total'],
         ]);
+    }
+
+    public function handle_import_lite_data(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('Not allowed.', 'dope-studio-business-reviews-slider'));
+        }
+
+        $nonce = isset($_POST['dsbrs_import_lite_nonce']) ? sanitize_text_field((string) wp_unslash($_POST['dsbrs_import_lite_nonce'])) : '';
+        if (! wp_verify_nonce($nonce, 'dsbrs_import_lite_data')) {
+            wp_die(esc_html__('Invalid request.', 'dope-studio-business-reviews-slider'));
+        }
+
+        $liteSettings = get_option('dsbrsl_settings', null);
+        $liteCache = get_option('dsbrsl_reviews_cache', null);
+
+        $redirectBase = add_query_arg([
+            'page' => 'dsbrs-dope-studio-business-reviews-slider',
+            'tab'  => 'general',
+        ], admin_url('admin.php'));
+
+        if ((! is_array($liteSettings) && ! is_array($liteCache)) || (empty($liteSettings) && empty($liteCache))) {
+            wp_safe_redirect(add_query_arg('import_lite', 'none', $redirectBase));
+            exit;
+        }
+
+        $proSettings = get_option(self::SETTINGS_OPTION, []);
+        if (! is_array($proSettings)) {
+            $proSettings = [];
+        }
+
+        $googleSettingKeys = [
+            'token',
+            'enable_google',
+            'place_id',
+            'place_url',
+            'google_places_api_key',
+            'use_places_api_summary',
+            'max_reviews',
+            'language',
+            'theme',
+            'show_no_comment',
+            'autoplay_default',
+            'autoplay_interval_default',
+            'cron_enabled',
+            'cron_frequency',
+            'cron_time',
+            'cron_fetch_scope',
+            'loop_infinite_default',
+            'show_dots_default',
+            'swipe_default',
+            'slides_mobile_default',
+            'slides_tablet_default',
+            'slides_desktop_default',
+            'display_limit_default',
+            'show_summary_default',
+            'show_read_on_google_default',
+            'rating_mode_default',
+            'manual_rating_default',
+            'min_rating_default',
+            'review_count_mode',
+            'custom_review_count',
+        ];
+
+        if (is_array($liteSettings)) {
+            foreach ($googleSettingKeys as $key) {
+                if (array_key_exists($key, $liteSettings)) {
+                    $proSettings[$key] = $liteSettings[$key];
+                }
+            }
+        }
+
+        $proCache = get_option(self::CACHE_OPTION, []);
+        if (! is_array($proCache)) {
+            $proCache = [];
+        }
+
+        if (is_array($liteCache)) {
+            $googleCacheKeys = ['reviews', 'total_reviews', 'places_rating', 'places_total_reviews', 'places_url', 'updated_at'];
+            foreach ($googleCacheKeys as $key) {
+                if (array_key_exists($key, $liteCache)) {
+                    $proCache[$key] = $liteCache[$key];
+                }
+            }
+        }
+
+        $updatedSettings = update_option(self::SETTINGS_OPTION, $proSettings, false);
+        $updatedCache = update_option(self::CACHE_OPTION, $proCache, false);
+
+        if ((! is_array($liteSettings) && ! is_array($liteCache)) || (empty($liteSettings) && empty($liteCache))) {
+            wp_safe_redirect(add_query_arg('import_lite', 'failed', $redirectBase));
+            exit;
+        }
+
+        wp_safe_redirect(add_query_arg('import_lite', 'success', $redirectBase));
+        exit;
     }
 
     public function run_scheduled_fetch(): void

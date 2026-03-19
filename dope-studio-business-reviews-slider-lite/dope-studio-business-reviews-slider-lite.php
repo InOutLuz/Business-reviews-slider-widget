@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider Lite
  * Description: Fetch and display Google reviews with a customizable slider widget.
- * Version: 1.0.0
+ * Version: 1.0.6
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * License: GPL-2.0+
@@ -24,6 +24,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
 
     public function __construct()
     {
+        add_action('admin_init', [$this, 'maybe_repair_legacy_defaults'], 5);
         add_action('admin_menu', [$this, 'register_admin_page']);
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
@@ -96,16 +97,54 @@ class DSBRSL_Google_Reviews_Slider_Lite
         );
     }
 
+    public function maybe_repair_legacy_defaults(): void
+    {
+        if (get_option('dsbrsl_legacy_defaults_fixed_103', '0') === '1') {
+            return;
+        }
+
+        $settings = get_option(self::SETTINGS_OPTION, null);
+        if (! is_array($settings)) {
+            update_option('dsbrsl_legacy_defaults_fixed_103', '1', false);
+            return;
+        }
+
+        $changed = false;
+
+        foreach (['use_places_api_summary', 'cron_enabled', 'delete_on_uninstall'] as $checkboxKey) {
+            if (isset($settings[$checkboxKey]) && (int) $settings[$checkboxKey] === 1) {
+                $settings[$checkboxKey] = 0;
+                $changed = true;
+            }
+        }
+
+        if (isset($settings['max_reviews']) && (int) $settings['max_reviews'] === 1) {
+            $settings['max_reviews'] = 0;
+            $changed = true;
+        }
+
+        if (isset($settings['display_limit_default']) && (int) $settings['display_limit_default'] === 6) {
+            $settings['display_limit_default'] = 0;
+            $changed = true;
+        }
+
+        if ($changed) {
+            update_option(self::SETTINGS_OPTION, $settings);
+        }
+
+        update_option('dsbrsl_legacy_defaults_fixed_103', '1', false);
+    }
+
     public function sanitize_settings(array $input): array
     {
         $output = [];
 
-        $output['enable_google'] = isset($input['enable_google']) ? 1 : 0;
+        $output['enable_google'] = $this->sanitize_checkbox_value($input, 'enable_google');
         $output['token'] = isset($input['token']) ? sanitize_text_field($input['token']) : '';
         $output['place_id'] = isset($input['place_id']) ? sanitize_text_field($input['place_id']) : '';
         $output['place_url'] = isset($input['place_url']) ? esc_url_raw((string) $input['place_url']) : '';
         $output['google_places_api_key'] = isset($input['google_places_api_key']) ? sanitize_text_field($input['google_places_api_key']) : '';
-        $output['use_places_api_summary'] = isset($input['use_places_api_summary']) ? 1 : 0;
+        $output['use_places_api_summary'] = $this->sanitize_checkbox_value($input, 'use_places_api_summary');
 
         $maxReviewsRaw = isset($input['max_reviews']) ? trim((string) $input['max_reviews']) : '';
         if ($maxReviewsRaw === '') {
@@ -119,13 +158,13 @@ class DSBRSL_Google_Reviews_Slider_Lite
         $theme = isset($input['theme']) ? sanitize_key($input['theme']) : 'dark';
         $output['theme'] = in_array($theme, ['dark', 'light'], true) ? $theme : 'dark';
 
-        $output['autoplay_default'] = isset($input['autoplay_default']) ? 1 : 0;
+        $output['autoplay_default'] = $this->sanitize_checkbox_value($input, 'autoplay_default');
         $output['autoplay_interval_default'] = isset($input['autoplay_interval_default'])
             ? max(1500, min(20000, absint($input['autoplay_interval_default'])))
             : 5500;
-        $output['loop_infinite_default'] = isset($input['loop_infinite_default']) ? 1 : 0;
-        $output['show_dots_default'] = isset($input['show_dots_default']) ? 1 : 0;
-        $output['swipe_default'] = isset($input['swipe_default']) ? 1 : 0;
+        $output['loop_infinite_default'] = $this->sanitize_checkbox_value($input, 'loop_infinite_default');
+        $output['show_dots_default'] = $this->sanitize_checkbox_value($input, 'show_dots_default');
+        $output['swipe_default'] = $this->sanitize_checkbox_value($input, 'swipe_default');
         $output['slides_mobile_default'] = isset($input['slides_mobile_default']) ? max(1, min(6, absint($input['slides_mobile_default']))) : 1;
         $output['slides_tablet_default'] = isset($input['slides_tablet_default']) ? max(1, min(6, absint($input['slides_tablet_default']))) : 2;
         $output['slides_desktop_default'] = isset($input['slides_desktop_default']) ? max(1, min(6, absint($input['slides_desktop_default']))) : 3;
@@ -137,9 +176,9 @@ class DSBRSL_Google_Reviews_Slider_Lite
             $output['display_limit_default'] = max(6, min(500, absint($displayLimitRaw)));
         }
 
-        $output['show_summary_default'] = isset($input['show_summary_default']) ? 1 : 0;
-        $output['show_read_on_google_default'] = isset($input['show_read_on_google_default']) ? 1 : 0;
-        $output['show_no_comment'] = isset($input['show_no_comment']) ? 1 : 0;
+        $output['show_summary_default'] = $this->sanitize_checkbox_value($input, 'show_summary_default');
+        $output['show_read_on_google_default'] = $this->sanitize_checkbox_value($input, 'show_read_on_google_default');
+        $output['show_no_comment'] = $this->sanitize_checkbox_value($input, 'show_no_comment');
 
         $minRating = isset($input['min_rating_default']) ? absint($input['min_rating_default']) : 0;
         $output['min_rating_default'] = in_array($minRating, [0, 2, 3, 4, 5], true) ? $minRating : 0;
@@ -155,7 +194,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
         $titleDefault = isset($input['title_default']) ? trim((string) $input['title_default']) : '';
         $output['title_default'] = $titleDefault !== '' ? sanitize_text_field($titleDefault) : 'Latest reviews';
 
-        $output['cron_enabled'] = isset($input['cron_enabled']) ? 1 : 0;
+        $output['cron_enabled'] = $this->sanitize_checkbox_value($input, 'cron_enabled');
 
         $cronFrequency = isset($input['cron_frequency']) ? sanitize_key((string) $input['cron_frequency']) : 'weekly';
         $allowedFrequencies = ['twicedaily', 'daily', 'weekly', 'dsbrsl_every_2_days', 'dsbrsl_monthly'];
@@ -170,9 +209,23 @@ class DSBRSL_Google_Reviews_Slider_Lite
         $cronFetchScope = isset($input['cron_fetch_scope']) ? sanitize_key((string) $input['cron_fetch_scope']) : 'enabled';
         $output['cron_fetch_scope'] = in_array($cronFetchScope, ['enabled', 'all', 'google'], true) ? $cronFetchScope : 'enabled';
 
-        $output['delete_on_uninstall'] = isset($input['delete_on_uninstall']) ? 1 : 0;
+        $output['delete_on_uninstall'] = $this->sanitize_checkbox_value($input, 'delete_on_uninstall');
 
         return $output;
+    }
+
+    private function sanitize_checkbox_value(array $input, string $key): int
+    {
+        if (! array_key_exists($key, $input)) {
+            return 0;
+        }
+
+        $value = $input[$key];
+        if (is_array($value)) {
+            $value = end($value);
+        }
+
+        return in_array((string) $value, ['1', 'true', 'on', 'yes'], true) ? 1 : 0;
     }
 
     public function enqueue_admin_assets(string $hook): void
@@ -209,14 +262,14 @@ class DSBRSL_Google_Reviews_Slider_Lite
             'dsbrsl-frontend-style',
             plugin_dir_url(__FILE__) . 'assets/frontend.css',
             [],
-            '1.0.0'
+            '1.0.5'
         );
 
         wp_register_script(
             'dsbrsl-frontend-script',
             plugin_dir_url(__FILE__) . 'assets/frontend.js',
             [],
-            '1.0.0',
+            '1.0.5',
             true
         );
     }
@@ -367,6 +420,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Places API summary (optional)', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
+                                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[use_places_api_summary]" value="0" />
                                         <label for="grs_use_places_api_summary">
                                             <input id="grs_use_places_api_summary" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[use_places_api_summary]" value="1" <?php checked((int) ($settings['use_places_api_summary'] ?? 0), 1); ?> />
                                             <?php esc_html_e('Use Places API rating and total reviews in header (requires Place ID + API key).', 'dope-studio-business-reviews-slider-lite'); ?>
@@ -376,7 +430,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><label for="grs_max_reviews"><?php esc_html_e('Max reviews', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
                                     <td>
-                                        <input id="grs_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[max_reviews]" value="<?php echo esc_attr((string) (($settings['max_reviews'] ?? 0) === 0 ? '' : ($settings['max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider-lite'); ?>" />
+                                        <input id="grs_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[max_reviews]" value="<?php echo esc_attr((string) ((int) ($settings['max_reviews'] ?? 0) <= 0 ? '' : (int) ($settings['max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider-lite'); ?>" />
                                         <p class="description"><?php esc_html_e('Leave empty to fetch all available reviews (can consume more Apify credits).', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
@@ -424,6 +478,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
                                 <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Auto-fetch cron', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
+                                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="0" />
                                         <label for="grs_cron_enabled">
                                             <input id="grs_cron_enabled" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="1" <?php checked((int) ($settings['cron_enabled'] ?? 0), 1); ?> />
                                             <?php esc_html_e('Enable scheduled automatic fetch', 'dope-studio-business-reviews-slider-lite'); ?>
@@ -463,6 +518,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
                                 <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Data cleanup', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
+                                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[delete_on_uninstall]" value="0" />
                                         <label for="grs_delete_on_uninstall">
                                             <input id="grs_delete_on_uninstall" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[delete_on_uninstall]" value="1" <?php checked((int) ($settings['delete_on_uninstall'] ?? 0), 1); ?> />
                                             <?php esc_html_e('Delete all plugin data when uninstalling the plugin', 'dope-studio-business-reviews-slider-lite'); ?>
@@ -481,11 +537,11 @@ class DSBRSL_Google_Reviews_Slider_Lite
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                                    <th scope="row"><?php esc_html_e('Dots navigation', 'dope-studio-business-reviews-slider-lite'); ?></th>
+                                    <th scope="row"><?php esc_html_e('Progress bar', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
                                         <label for="grs_show_dots_default">
                                             <input id="grs_show_dots_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_dots_default]" value="1" <?php checked((int) ($settings['show_dots_default'] ?? 1), 1); ?> />
-                                            <?php esc_html_e('Show pagination dots', 'dope-studio-business-reviews-slider-lite'); ?>
+                                            <?php esc_html_e('Show slider progress bar', 'dope-studio-business-reviews-slider-lite'); ?>
                                         </label>
                                     </td>
                                 </tr>
@@ -514,6 +570,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
                                             <option value="auto" <?php selected(($settings['rating_mode_default'] ?? 'auto'), 'auto'); ?>><?php esc_html_e('Auto (from fetched reviews)', 'dope-studio-business-reviews-slider-lite'); ?></option>
                                             <option value="manual" <?php selected(($settings['rating_mode_default'] ?? ''), 'manual'); ?>><?php esc_html_e('Manual', 'dope-studio-business-reviews-slider-lite'); ?></option>
                                         </select>
+                                        <p class="description"><?php esc_html_e('Apify does not provide a dedicated business-wide star rating field. Auto mode calculates rating from fetched reviews and may differ from your public profile rating.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
@@ -549,7 +606,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><label for="grs_display_limit_default"><?php esc_html_e('Reviews to display', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
                                     <td>
-                                        <input id="grs_display_limit_default" type="number" min="6" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[display_limit_default]" value="<?php echo esc_attr((string) (($settings['display_limit_default'] ?? 0) === 0 ? '' : ($settings['display_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider-lite'); ?>" />
+                                        <input id="grs_display_limit_default" type="number" min="6" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[display_limit_default]" value="<?php echo esc_attr((string) ((int) ($settings['display_limit_default'] ?? 0) <= 0 ? '' : (int) ($settings['display_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider-lite'); ?>" />
                                         <p class="description"><?php esc_html_e('Frontend only: limit shown reviews. Leave empty to show all fetched reviews. Minimum when set: 6. Applied after filters (no-comment/rating).', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>

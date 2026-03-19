@@ -4,197 +4,265 @@ Tags: reviews, google reviews, slider
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.0.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Google review slider plugin with manual and automatic fetching, rich display controls, and fast cached frontend output.
+Display unlimited Google reviews in a beautiful slider — completely free. No API billing surprises, no review caps.
 
 == Description ==
 
-By [Dope Studio](https://profiles.wordpress.org/dopestudio)
+**Show unlimited Google reviews on your site for free.** Dope Studio Business Reviews Slider Lite fetches and displays your Google reviews in a polished, responsive slider — with no limits on how many reviews you can show.
 
-Dope Studio Business Reviews Slider Lite helps you fetch and display Google reviews in responsive, customizable sliders.
+The plugin uses [Apify](https://apify.com) to fetch your reviews. Apify offers a generous free tier that covers most small and medium businesses with no credit card required. You're in control of your own account and your own data.
 
-**Pro version available (Free):** includes additional review platforms and more advanced controls.
+**Free and unlimited.** Fetch as many reviews as you like, display as many as you want, and pay nothing — as long as you stay within Apify's free usage limits, which are more than enough for the vast majority of sites.
 
-### Core highlights
+**Pro version available — also free:** adds support for additional review platforms and more advanced controls. [Check pro features](https://products.dopestudio.co.uk/brs/)
 
-- Google reviews support
-- Cron job for automatic scheduled fetching
-- Manual fetch option
-- Cached storage in WordPress options
-- Fast shortcode rendering on frontend
+---
 
-### Slider UI/UX
+### Why Dope Studio Business Reviews Slider?
 
+Getting Google reviews onto your site has always meant either paying for an expensive SaaS widget subscription or wrestling with the restrictive (and increasingly costly) Google Places API. This plugin takes a different approach:
+
+- **Unlimited reviews, zero cost** — Apify's free tier is genuinely generous. Most sites will never need to pay a penny.
+- **No Google API key required** — reviews are fetched via Apify, so you don't need to set up Google Cloud billing just to show your reviews.
+- **You own your data** — reviews are cached directly in your WordPress database. No third-party dashboard, no lock-in.
+- **One shortcode, done** — drop `[dsbrsl_google_reviews_slider]` anywhere and your reviews appear.
+
+---
+
+### What's included in Lite
+
+**Review fetching**
+- Fetch unlimited Google reviews via Apify (free tier)
+- Manual fetch from wp-admin whenever you need fresh reviews
+- Automatic scheduled fetching via WordPress cron — set it and forget it
+- Reviews cached in WordPress options for fast, server-efficient rendering
+
+**Beautiful slider**
 - Dark and light themes
 - Autoplay with custom interval
 - Optional infinite loop
-- Dots navigation
-- Mobile/tablet swipe support
-- Per-device cards per view (mobile / tablet / desktop)
-- Optional top summary block
+- Dot navigation
+- Mobile and tablet swipe support
+- Configurable cards per view across mobile, tablet, and desktop
+- Optional summary header block showing overall rating and review count
 
-### Review filtering and header controls
+**Full display control**
+- Filter out reviews below a minimum star rating
+- Hide reviews with no written comment
+- Set a frontend display limit independently from your fetch limit
+- Show reviews newest-first
+- Optionally show or hide "Read on Google" links
 
-- Hide textless reviews
-- Minimum rating filter
-- Frontend display limit
-- Newest-first ordering
-- Rating source: Auto or Manual
-- Header review count: Fetched or Custom
+**Optional Google Places enrichment**
+- Pull your live overall rating and total review count from the Google Places API to display in the header — useful if you want the header to reflect your full review total rather than just fetched reviews
+- Entirely optional — the plugin works great without a Google API key
 
-### Optional Google summary enrichment
+---
 
-- Option 1: Use Google Places API for automatic fetching of rating and review-count summary in header
-- Option 2: Keep review text/cards sourced from fetched reviews only (No Google Places API required)
+== Screenshots ==
 
+1. Admin settings page — data source and Apify token configuration
+2. Admin settings page - Google slider settings
+3. Slider preview — light theme, mobile layout
+4. Slider preview — dark theme, desktop layout
+
+
+---
 
 == External services ==
 
 This plugin connects to third-party services to fetch review data and optional rating summary data.
 
-1) Apify (review fetching)
-- Purpose: fetches Google reviews.
-- When data is sent: only when you manually run a fetch from wp-admin.
-- Data sent: Apify API token, Google Place ID and/or Google Maps URL, selected language, max review limit.
-- Terms: https://apify.com/terms
-- Privacy policy: https://apify.com/privacy
+**1. Apify (review fetching)**
+- Purpose: fetches Google reviews on your behalf.
+- When data is sent: only when you manually trigger a fetch from wp-admin, or when the scheduled cron runs.
+- Data sent: your Apify API token, Google Place ID and/or Google Maps URL, selected language, and max review limit.
+- Apify free tier: https://apify.com/pricing
+- Terms: https://docs.apify.com/legal/general-terms-and-conditions
+- Privacy policy: https://docs.apify.com/legal/privacy-policy
 
-1) Google Places API (optional summary enrichment)
-- Purpose: retrieves Google place summary fields (for example rating and rating count) when Places summary mode is enabled.
-- When data is sent: during Google fetch operations, only if Places summary mode is enabled and a Places API key is configured.
-- Data sent: Google Places API key and Google Place ID.
+**2. Google Places API (optional — for summary header only)**
+- Purpose: retrieves your place's overall rating and total review count for display in the slider header.
+- When data is sent: only during fetch operations, and only if you have enabled Places summary mode and added a Places API key.
+- Data sent: your Google Places API key and Google Place ID.
 - Terms: https://cloud.google.com/maps-platform/terms
 - Privacy policy: https://policies.google.com/privacy
+
+---
 
 == Requirements ==
 
 - WordPress 6.0+
 - PHP 7.4+
-- Outbound HTTP access from server
-- Apify account + API token
+- Outbound HTTP access from your server
+- Free Apify account + API token (https://apify.com)
 
 Optional:
-- Google Places API key (for optional Places summary enrichment)
+- Google Places API key (only needed if you want the Places-powered summary header)
+
+---
 
 == Quick start ==
 
-1. Open **Business Reviews Lite** in wp-admin.
-2. Add your **Apify token**.
-3. Add Google source:
-	- Place ID and/or Google Maps URL
-4. (Optional) add Google Places API key and enable Places summary.
+Getting up and running takes about two minutes:
+
+1. Sign up for a free Apify account at https://apify.com and copy your API token.
+2. Activate the plugin and open **Business Reviews Lite** in wp-admin.
+3. Paste your **Apify token**.
+4. Add your Google source — either a **Place ID** or a **Google Maps URL** (or both).
 5. Click **Fetch Google reviews now**.
-6. Add shortcode to a page/post:
-	- `[dsbrsl_google_reviews_slider]`
+6. Drop the shortcode onto any page or post: `[dsbrsl_google_reviews_slider]`
+
+That's it. Your reviews are live.
+
+---
 
 == Installation ==
 
-1. Upload plugin files to `/wp-content/plugins/dope-studio-business-reviews-slider-lite`.
-2. Activate the plugin through the WordPress plugins screen.
-3. Open **Business Reviews Lite** in wp-admin.
-4. Add your Apify token and Google source data.
-5. Click **Fetch Google reviews now**.
+1. Upload the plugin folder to `/wp-content/plugins/dope-studio-business-reviews-slider-lite`.
+2. Activate the plugin through the WordPress **Plugins** screen.
+3. Open **Business Reviews Lite** in wp-admin and follow the Quick start steps above.
+
+---
 
 == Admin settings overview ==
 
-### Data source
-- Enable Google reviews
-- Apify token
+**Data source**
+- Enable Google reviews toggle
+- Apify API token
 - Google Place ID
 - Google Maps URL
 - Max reviews to fetch
-- Language
+- Review language
 
-### Optional Places summary
+**Automatic fetching**
+- Enable cron auto-fetch
+- Fetch frequency
+- Fetch start time
+- Fetch scope
+
+**Optional Places summary**
 - Google Places API key
 - Use Places summary toggle
 
-### Slider defaults
-- Theme
+**Slider defaults**
+- Theme (dark / light)
 - Autoplay + interval
 - Infinite loop
-- Dots
+- Dot navigation
 - Swipe
-- Slides per view (mobile/tablet/desktop)
+- Slides per view (mobile / tablet / desktop)
 - Slider title
 - Display limit
-- Show summary toggle
-- Show “Read on Google” link toggle
+- Show summary block toggle
+- Show "Read on Google" link toggle
 
-### Rating and review counters
+**Rating and review counters**
 - Rating mode (Auto / Manual)
 - Manual rating value
 - Review count mode (Fetched / Custom)
-- Custom review count
+- Custom review count value
 
-### Filters
-- Minimum rating
+**Filters**
+- Minimum star rating
 - Hide textless reviews
+
+---
 
 == Usage ==
 
-Shortcode:
+**Basic shortcode:**
 `[dsbrsl_google_reviews_slider]`
 
-Common attributes:
+All settings from the admin page are used as defaults. You can override any of them per shortcode:
+
+`[dsbrsl_google_reviews_slider theme="light" limit="10" autoplay="1" desktop="3"]`
+
+**All available attributes:**
 - `theme="dark|light"`
-- `limit="0"`
+- `limit="0"` — number of reviews to display (0 = all)
 - `autoplay="0|1"`
-- `interval="1500-20000"`
+- `interval="1500-20000"` — autoplay speed in milliseconds
 - `loop="0|1"`
 - `show_dots="0|1"`
 - `swipe="0|1"`
-- `mobile="1-6"`
-- `tablet="1-6"`
-- `desktop="1-6"`
+- `mobile="1-6"` — cards per view on mobile
+- `tablet="1-6"` — cards per view on tablet
+- `desktop="1-6"` — cards per view on desktop
 - `show_summary="0|1"`
 - `show_read_on_google="0|1"`
 - `rating_mode="auto|manual"`
 - `manual_rating="0-5"`
 - `min_rating="0|2|3|4|5"`
-- `show_no_comment="1"`
+- `show_no_comment="0|1"`
+
+---
 
 == Storage ==
 
-The plugin stores settings and cached review data in WordPress options:
+Reviews and settings are stored entirely within your own WordPress database — nothing is sent to external servers except during a fetch operation.
 
-- `dsbrsl_settings`
-- `dsbrsl_reviews_cache`
+- `dsbrsl_settings` — plugin configuration
+- `dsbrsl_reviews_cache` — fetched review data
+
+---
 
 == Troubleshooting ==
 
-### Fetch timeout
-- Try lowering max reviews
-- Retry after a short wait
-- Check host outbound request limits/timeouts
+**Fetch times out**
+- Lower your max reviews count and try again
+- Check whether your hosting provider restricts outbound HTTP requests or has short timeout limits
+- Wait a moment and retry — Apify may occasionally be under load
 
-### No reviews displayed
-- Confirm shortcode is `[dsbrsl_google_reviews_slider]`
-- Ensure Google reviews are enabled in plugin settings
-- Run a manual fetch and verify cache count in admin
-- Verify Place ID / Maps URL is valid
+**No reviews showing on the frontend**
+- Confirm the shortcode is exactly `[dsbrsl_google_reviews_slider]`
+- Make sure Google reviews are enabled in plugin settings
+- Run a manual fetch and check the cache count shown in the admin panel
+- Double-check your Place ID or Google Maps URL is correct
 
-### Header rating/count differs from fetched reviews
-- If Places summary is enabled, header can use Places API values
-- Disable Places summary to use fetched review-derived values
+**Header rating or count looks wrong**
+- If Places summary is enabled, the header pulls from the Google Places API — this reflects your total review count across all time
+- Disable Places summary to use values derived from your fetched reviews only
+
+---
 
 == FAQ ==
 
-= Does Lite include scheduled cron fetch? =
-Yes. Lite includes cron auto-fetch options (enable, frequency, start time, and scope), matching Pro for Google features.
+= Is this really free and unlimited? =
+Yes. The plugin itself is free. Reviews are fetched via your own Apify account, which has a generous free tier. Most sites will fetch all the reviews they need without ever hitting a paid threshold. You can check Apify's current free tier limits at https://apify.com/pricing.
+
+= Do I need a Google API key? =
+No. A Google API key is only needed if you want to show a live total rating and review count in the slider header via the Places API. For standard review fetching and display, Apify handles everything.
 
 = Can I show unlimited reviews? =
-Yes. Keep fetch/display limits empty or set as needed.
+Yes. Leave the display limit empty or set it to 0 to show all fetched reviews. The fetch limit is only capped by your Apify account tier.
+
+= Does the Lite version include automatic scheduled fetching? =
+Yes. Lite includes full cron auto-fetch functionality — enable it, set a frequency and start time, and your reviews will refresh automatically.
 
 = Does Lite support multiple review platforms? =
-Lite is Google-only. Pro includes additional platforms and controls and is completely free.
+Lite is Google-only. The Pro version (also free) adds support for additional review platforms and more advanced controls.
+
+= Where are my reviews stored? =
+In your own WordPress database. The plugin caches fetched reviews locally so the frontend loads fast and no external requests are made on page load.
+
+---
 
 == Changelog ==
 
+= 1.0.6 =
+* Frontend pagination switched from dots to progress bar.
+* Stronger frontend style isolation to reduce theme CSS conflicts.
+* Admin label updated from "Dots navigation" to "Progress bar".
+
 = 1.0.0 =
-* Initial Lite release with Google reviews only.
-* Manual fetch workflow and responsive slider controls.
-* Optional Places API summary integration.
+* Initial Lite release with full Google reviews support.
+* Unlimited review fetching via Apify free tier.
+* Manual fetch and scheduled cron auto-fetch.
+* Responsive slider with dark and light themes.
+* Optional Google Places API summary integration.
+* Full shortcode attribute support for per-instance overrides.

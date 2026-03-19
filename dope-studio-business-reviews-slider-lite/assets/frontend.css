@@ -17,6 +17,24 @@
     color: var(--grs-text);
     padding: 18px;
     overflow: visible;
+    isolation: isolate;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.grs-slider-shell,
+.grs-slider-shell *,
+.grs-slider-shell *::before,
+.grs-slider-shell *::after {
+    box-sizing: border-box;
+}
+
+.grs-slider-shell a {
+    text-decoration: none;
+}
+
+.grs-slider-shell a:hover,
+.grs-slider-shell a:focus {
+    text-decoration: none;
 }
 
 .grs-theme-light {
@@ -201,6 +219,8 @@
 }
 
 .grs-icon-btn {
+    all: unset;
+    box-sizing: border-box;
     width: 38px;
     height: 38px;
     border-radius: 999px;
@@ -211,10 +231,31 @@
     transition: transform 0.15s ease, border-color 0.15s ease;
     font-size: 24px;
     line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    appearance: none;
+    -webkit-appearance: none;
+    font-family: inherit;
+    text-transform: none;
+    letter-spacing: normal;
 }
 
 .grs-theme-light .grs-icon-btn {
     background: #fff;
+}
+
+.grs-slider-shell .grs-icon-btn,
+.grs-slider-shell .grs-icon-btn:hover,
+.grs-slider-shell .grs-icon-btn:focus,
+.grs-slider-shell .grs-icon-btn:focus-visible,
+.grs-slider-shell .grs-icon-btn:active {
+    background: var(--grs-card) !important;
+    border-color: var(--grs-stroke) !important;
+    color: var(--grs-text) !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    outline: none !important;
 }
 
 .grs-icon-btn:hover {
@@ -405,32 +446,41 @@
 }
 
 .grs-dots {
-    display: flex;
-    justify-content: center;
-    gap: 8px;
+    display: block;
+    width: min(240px, 72%);
+    max-width: 100%;
     margin-top: 12px;
-    flex-wrap: wrap;
+    margin-left: auto;
+    margin-right: auto;
 }
 
-.grs-dot {
-    width: 8px;
-    height: 8px;
+.grs-progress-track {
+    position: relative;
+    width: 100%;
+    height: 7px;
     border-radius: 999px;
-    border: 1px solid var(--grs-stroke);
-    background: #d1d7e0;
-    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    background: rgba(255, 255, 255, 0.92);
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08) inset;
 }
 
-.grs-theme-light .grs-dot {
-    background: #d1d7e0;
+.grs-theme-light .grs-progress-track {
+    border-color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.96);
 }
 
-.grs-theme-dark .grs-dot {
-    background: #495364;
+.grs-theme-dark .grs-progress-track {
+    border-color: rgba(255, 255, 255, 0.72);
+    background: rgba(255, 255, 255, 0.88);
 }
 
-.grs-dot.is-active {
-    background: var(--grs-accent);
-    border-color: var(--grs-accent);
-    box-shadow: none;
+.grs-progress-fill {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, #cbd5e1 0%, #9ca3af 100%);
+    transform-origin: left center;
+    transform: scaleX(0);
+    transition: transform 0.28s ease;
+    box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.2) inset;
 }

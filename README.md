@@ -4,7 +4,7 @@ Tags: reviews, google reviews, trustpilot, slider
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.0.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -47,8 +47,8 @@ This plugin connects to third-party services to fetch review data and optional r
 - Purpose: fetches Google and Trustpilot reviews.
 - When data is sent: only when you manually run a fetch from wp-admin or when scheduled WP-Cron fetching runs.
 - Data sent: Apify API token, target source values you configure (Google Place ID and/or Google Maps URL, Trustpilot domain), selected language, and max review limits.
-- Terms: https://apify.com/terms
-- Privacy policy: https://apify.com/privacy
+- Terms: https://docs.apify.com/legal/general-terms-and-conditions
+- Privacy policy: https://docs.apify.com/legal/privacy-policy
 
 2) Google Places API (optional summary enrichment)
 - Purpose: retrieves Google place summary fields (for example rating and rating count) when optional Places summary mode is enabled.
@@ -290,6 +290,11 @@ Current option keys:
 ---
 
 ## 11) Changelog (local)
+
+### 1.0.6
+- Frontend pagination switched from dots to progress bar (Google + Trustpilot)
+- Stronger frontend style isolation to reduce theme CSS conflicts
+- Admin labels updated from "Dots navigation" to "Progress bar"
 
 ### 1.0.0
 - Initial release with Google + Trustpilot review slider

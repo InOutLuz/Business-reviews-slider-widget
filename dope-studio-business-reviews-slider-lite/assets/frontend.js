@@ -32,6 +32,9 @@
     let timer = null;
     let touchStartX = 0;
     let touchDiff = 0;
+    let totalPages = 0;
+    let progressTrack = null;
+    let progressFill = null;
 
     const getMetrics = () => {
       const firstSlide = slides()[0];
@@ -106,10 +109,44 @@
       nextBtn.disabled = page >= mp;
     };
 
-    const setActiveDot = () => {
-      Array.from(dotsWrap.children).forEach((dot, index) => {
-        dot.classList.toggle('is-active', index === page);
-      });
+    const ensureProgressMarkup = () => {
+      if (progressTrack && progressFill) {
+        return;
+      }
+
+      dotsWrap.innerHTML = '';
+
+      progressTrack = document.createElement('div');
+      progressTrack.className = 'grs-progress-track';
+
+      progressFill = document.createElement('span');
+      progressFill.className = 'grs-progress-fill';
+      progressTrack.appendChild(progressFill);
+
+      dotsWrap.appendChild(progressTrack);
+    };
+
+    const renderProgress = () => {
+      if (!dotsEnabled || totalPages <= 1) {
+        dotsWrap.style.display = 'none';
+        dotsWrap.innerHTML = '';
+        progressTrack = null;
+        progressFill = null;
+        return;
+      }
+
+      dotsWrap.style.display = 'block';
+      ensureProgressMarkup();
+
+      const clampedPage = clamp(page, 0, totalPages - 1);
+      const ratio = totalPages <= 1 ? 1 : ((clampedPage + 1) / totalPages);
+      progressFill.style.transform = `scaleX(${ratio})`;
+
+      dotsWrap.setAttribute('role', 'progressbar');
+      dotsWrap.setAttribute('aria-valuemin', '1');
+      dotsWrap.setAttribute('aria-valuemax', String(totalPages));
+      dotsWrap.setAttribute('aria-valuenow', String(clampedPage + 1));
+      dotsWrap.setAttribute('aria-label', `Slide ${clampedPage + 1} of ${totalPages}`);
     };
 
     const go = (targetPage, instant = false) => {
@@ -139,7 +176,7 @@
       }
 
       setControls();
-      setActiveDot();
+      renderProgress();
     };
 
     const buildDots = () => {
@@ -152,24 +189,8 @@
       perView = getMetrics().perView;
       rebuildTrack();
       page = clamp(page, 0, maxPage());
-      dotsWrap.innerHTML = '';
-      const total = maxPage() + 1;
-      if (total <= 1) {
-        dotsWrap.style.display = 'none';
-        return;
-      }
-      dotsWrap.style.display = 'flex';
-      for (let i = 0; i < total; i += 1) {
-        const btn = document.createElement('button');
-        btn.className = `grs-dot${i === page ? ' is-active' : ''}`;
-        btn.type = 'button';
-        btn.setAttribute('aria-label', `Go to slide page ${i + 1}`);
-        btn.addEventListener('click', () => {
-          go(i);
-          restartAutoplay();
-        });
-        dotsWrap.appendChild(btn);
-      }
+      totalPages = maxPage() + 1;
+      renderProgress();
     };
 
     const autoplayEnabled = root.getAttribute('data-autoplay') === '1';

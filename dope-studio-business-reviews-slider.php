@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider
  * Description: Fetch and display Google and Trustpilot reviews with a customizable slider widget.
- * Version: 1.0.0
+ * Version: 1.0.6
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * License: GPL-2.0+
@@ -26,6 +26,7 @@ class DSBRS_Business_Reviews_Slider_Widget
 
     public function __construct()
     {
+        add_action('admin_init', [$this, 'maybe_repair_legacy_defaults'], 5);
         add_action('admin_menu', [$this, 'register_admin_page']);
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
@@ -124,17 +125,65 @@ class DSBRS_Business_Reviews_Slider_Widget
         ]);
     }
 
+    public function maybe_repair_legacy_defaults(): void
+    {
+        if (get_option('dsbrs_legacy_defaults_fixed_103', '0') === '1') {
+            return;
+        }
+
+        $settings = get_option(self::SETTINGS_OPTION, null);
+        if (! is_array($settings)) {
+            update_option('dsbrs_legacy_defaults_fixed_103', '1', false);
+            return;
+        }
+
+        $changed = false;
+
+        foreach (['use_places_api_summary', 'cron_enabled', 'delete_on_uninstall'] as $checkboxKey) {
+            if (isset($settings[$checkboxKey]) && (int) $settings[$checkboxKey] === 1) {
+                $settings[$checkboxKey] = 0;
+                $changed = true;
+            }
+        }
+
+        if (isset($settings['max_reviews']) && (int) $settings['max_reviews'] === 1) {
+            $settings['max_reviews'] = 0;
+            $changed = true;
+        }
+
+        if (isset($settings['display_limit_default']) && (int) $settings['display_limit_default'] === 6) {
+            $settings['display_limit_default'] = 0;
+            $changed = true;
+        }
+
+        if (isset($settings['trustpilot_max_reviews']) && (int) $settings['trustpilot_max_reviews'] === 1) {
+            $settings['trustpilot_max_reviews'] = 0;
+            $changed = true;
+        }
+
+        if (isset($settings['trustpilot_display_limit_default']) && (int) $settings['trustpilot_display_limit_default'] === 6) {
+            $settings['trustpilot_display_limit_default'] = 0;
+            $changed = true;
+        }
+
+        if ($changed) {
+            update_option(self::SETTINGS_OPTION, $settings);
+        }
+
+        update_option('dsbrs_legacy_defaults_fixed_103', '1', false);
+    }
+
     public function sanitize_settings(array $input): array
     {
         $output = [];
 
         $output['token'] = isset($input['token']) ? sanitize_text_field($input['token']) : '';
-        $output['enable_google'] = isset($input['enable_google']) ? 1 : 0;
-        $output['enable_trustpilot'] = isset($input['enable_trustpilot']) ? 1 : 0;
+        $output['enable_google'] = $this->sanitize_checkbox_value($input, 'enable_google');
+        $output['enable_trustpilot'] = $this->sanitize_checkbox_value($input, 'enable_trustpilot');
         $output['place_id'] = isset($input['place_id']) ? sanitize_text_field($input['place_id']) : '';
         $output['place_url'] = isset($input['place_url']) ? esc_url_raw($input['place_url']) : '';
         $output['google_places_api_key'] = isset($input['google_places_api_key']) ? sanitize_text_field($input['google_places_api_key']) : '';
-        $output['use_places_api_summary'] = isset($input['use_places_api_summary']) ? 1 : 0;
+        $output['use_places_api_summary'] = $this->sanitize_checkbox_value($input, 'use_places_api_summary');
 
         $maxReviewsRaw = isset($input['max_reviews']) ? trim((string) $input['max_reviews']) : '';
         if ($maxReviewsRaw === '') {
@@ -153,10 +202,10 @@ class DSBRS_Business_Reviews_Slider_Widget
         $output['trustpilot_domain'] = isset($input['trustpilot_domain']) ? sanitize_text_field($input['trustpilot_domain']) : '';
 
         $output['language'] = isset($input['language']) ? sanitize_text_field($input['language']) : 'en';
-        $output['show_no_comment'] = isset($input['show_no_comment']) ? 1 : 0;
-        $output['autoplay_default'] = isset($input['autoplay_default']) ? 1 : 0;
+        $output['show_no_comment'] = $this->sanitize_checkbox_value($input, 'show_no_comment');
+        $output['autoplay_default'] = $this->sanitize_checkbox_value($input, 'autoplay_default');
         $output['autoplay_interval_default'] = isset($input['autoplay_interval_default']) ? max(1500, min(20000, absint($input['autoplay_interval_default']))) : 5500;
-        $output['cron_enabled'] = isset($input['cron_enabled']) ? 1 : 0;
+        $output['cron_enabled'] = $this->sanitize_checkbox_value($input, 'cron_enabled');
 
         $cronFrequency = isset($input['cron_frequency']) ? sanitize_key($input['cron_frequency']) : 'weekly';
         $output['cron_frequency'] = in_array($cronFrequency, ['twicedaily', 'daily', 'weekly', 'dsbrs_every_2_days', 'dsbrs_monthly'], true) ? $cronFrequency : 'weekly';
@@ -169,16 +218,16 @@ class DSBRS_Business_Reviews_Slider_Widget
 
         $cronFetchScope = isset($input['cron_fetch_scope']) ? sanitize_key((string) $input['cron_fetch_scope']) : 'enabled';
         $output['cron_fetch_scope'] = in_array($cronFetchScope, ['enabled', 'all', 'google', 'trustpilot'], true) ? $cronFetchScope : 'enabled';
-        $output['delete_on_uninstall'] = isset($input['delete_on_uninstall']) ? 1 : 0;
+        $output['delete_on_uninstall'] = $this->sanitize_checkbox_value($input, 'delete_on_uninstall');
 
-        $output['loop_infinite_default'] = isset($input['loop_infinite_default']) ? 1 : 0;
-        $output['show_dots_default'] = isset($input['show_dots_default']) ? 1 : 0;
-        $output['swipe_default'] = isset($input['swipe_default']) ? 1 : 0;
-        $output['show_summary_default'] = isset($input['show_summary_default']) ? 1 : 0;
-        $output['show_read_on_google_default'] = isset($input['show_read_on_google_default']) ? 1 : 0;
-        $output['trustpilot_show_summary_default'] = isset($input['trustpilot_show_summary_default']) ? 1 : 0;
-        $output['trustpilot_show_titles_default'] = isset($input['trustpilot_show_titles_default']) ? 1 : 0;
-        $output['trustpilot_show_no_comment_default'] = isset($input['trustpilot_show_no_comment_default']) ? 1 : 0;
+        $output['loop_infinite_default'] = $this->sanitize_checkbox_value($input, 'loop_infinite_default');
+        $output['show_dots_default'] = $this->sanitize_checkbox_value($input, 'show_dots_default');
+        $output['swipe_default'] = $this->sanitize_checkbox_value($input, 'swipe_default');
+        $output['show_summary_default'] = $this->sanitize_checkbox_value($input, 'show_summary_default');
+        $output['show_read_on_google_default'] = $this->sanitize_checkbox_value($input, 'show_read_on_google_default');
+        $output['trustpilot_show_summary_default'] = $this->sanitize_checkbox_value($input, 'trustpilot_show_summary_default');
+        $output['trustpilot_show_titles_default'] = $this->sanitize_checkbox_value($input, 'trustpilot_show_titles_default');
+        $output['trustpilot_show_no_comment_default'] = $this->sanitize_checkbox_value($input, 'trustpilot_show_no_comment_default');
 
         $output['slides_mobile_default'] = isset($input['slides_mobile_default']) ? max(1, min(6, absint($input['slides_mobile_default']))) : 1;
         $output['slides_tablet_default'] = isset($input['slides_tablet_default']) ? max(1, min(6, absint($input['slides_tablet_default']))) : 2;
@@ -213,11 +262,11 @@ class DSBRS_Business_Reviews_Slider_Widget
         $output['trustpilot_theme'] = in_array($tpTheme, ['dark', 'light'], true) ? $tpTheme : 'dark';
         $tpLogoVariant = isset($input['trustpilot_logo_variant']) ? sanitize_key($input['trustpilot_logo_variant']) : 'white';
         $output['trustpilot_logo_variant'] = in_array($tpLogoVariant, ['white', 'black'], true) ? $tpLogoVariant : 'white';
-        $output['trustpilot_autoplay_default'] = isset($input['trustpilot_autoplay_default']) ? 1 : 0;
+        $output['trustpilot_autoplay_default'] = $this->sanitize_checkbox_value($input, 'trustpilot_autoplay_default');
         $output['trustpilot_autoplay_interval_default'] = isset($input['trustpilot_autoplay_interval_default']) ? max(1500, min(20000, absint($input['trustpilot_autoplay_interval_default']))) : 5500;
-        $output['trustpilot_loop_infinite_default'] = isset($input['trustpilot_loop_infinite_default']) ? 1 : 0;
-        $output['trustpilot_show_dots_default'] = isset($input['trustpilot_show_dots_default']) ? 1 : 0;
-        $output['trustpilot_swipe_default'] = isset($input['trustpilot_swipe_default']) ? 1 : 0;
+        $output['trustpilot_loop_infinite_default'] = $this->sanitize_checkbox_value($input, 'trustpilot_loop_infinite_default');
+        $output['trustpilot_show_dots_default'] = $this->sanitize_checkbox_value($input, 'trustpilot_show_dots_default');
+        $output['trustpilot_swipe_default'] = $this->sanitize_checkbox_value($input, 'trustpilot_swipe_default');
         $output['trustpilot_slides_mobile_default'] = isset($input['trustpilot_slides_mobile_default']) ? max(1, min(6, absint($input['trustpilot_slides_mobile_default']))) : 1;
         $output['trustpilot_slides_tablet_default'] = isset($input['trustpilot_slides_tablet_default']) ? max(1, min(6, absint($input['trustpilot_slides_tablet_default']))) : 2;
         $output['trustpilot_slides_desktop_default'] = isset($input['trustpilot_slides_desktop_default']) ? max(1, min(6, absint($input['trustpilot_slides_desktop_default']))) : 3;
@@ -238,6 +287,20 @@ class DSBRS_Business_Reviews_Slider_Widget
         $output['theme'] = in_array($theme, ['dark', 'light'], true) ? $theme : 'dark';
 
         return $output;
+    }
+
+    private function sanitize_checkbox_value(array $input, string $key): int
+    {
+        if (! array_key_exists($key, $input)) {
+            return 0;
+        }
+
+        $value = $input[$key];
+        if (is_array($value)) {
+            $value = end($value);
+        }
+
+        return in_array((string) $value, ['1', 'true', 'on', 'yes'], true) ? 1 : 0;
     }
 
     public function enqueue_admin_assets(string $hook): void
@@ -274,14 +337,14 @@ class DSBRS_Business_Reviews_Slider_Widget
             'dsbrs-frontend-style',
             plugin_dir_url(__FILE__) . 'assets/frontend.css',
             [],
-            '1.0.0'
+            '1.0.5'
         );
 
         wp_register_script(
             'dsbrs-frontend-script',
             plugin_dir_url(__FILE__) . 'assets/frontend.js',
             [],
-            '1.0.0',
+            '1.0.5',
             true
         );
     }
@@ -455,6 +518,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Places API summary (optional)', 'dope-studio-business-reviews-slider'); ?></th>
                                     <td>
+                                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[use_places_api_summary]" value="0" />
                                         <label for="grs_use_places_api_summary">
                                             <input id="grs_use_places_api_summary" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[use_places_api_summary]" value="1" <?php checked((int) ($settings['use_places_api_summary'] ?? 0), 1); ?> />
                                             <?php esc_html_e('Use Places API rating and total reviews in header (requires Place ID + API key).', 'dope-studio-business-reviews-slider'); ?>
@@ -464,7 +528,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><label for="grs_max_reviews"><?php esc_html_e('Max reviews', 'dope-studio-business-reviews-slider'); ?></label></th>
                                     <td>
-                                        <input id="grs_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[max_reviews]" value="<?php echo esc_attr((string) (($settings['max_reviews'] ?? 0) === 0 ? '' : ($settings['max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider'); ?>" />
+                                        <input id="grs_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[max_reviews]" value="<?php echo esc_attr((string) ((int) ($settings['max_reviews'] ?? 0) <= 0 ? '' : (int) ($settings['max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider'); ?>" />
                                         <p class="description"><?php esc_html_e('Leave empty to fetch all available reviews (can consume more Apify credits).', 'dope-studio-business-reviews-slider'); ?></p>
                                     </td>
                                 </tr>
@@ -483,7 +547,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                                 <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
                                     <th scope="row"><label for="grs_trustpilot_max_reviews"><?php esc_html_e('Trustpilot max reviews', 'dope-studio-business-reviews-slider'); ?></label></th>
                                     <td>
-                                        <input id="grs_trustpilot_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_max_reviews]" value="<?php echo esc_attr((string) (($settings['trustpilot_max_reviews'] ?? 0) === 0 ? '' : ($settings['trustpilot_max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider'); ?>" />
+                                        <input id="grs_trustpilot_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_max_reviews]" value="<?php echo esc_attr((string) ((int) ($settings['trustpilot_max_reviews'] ?? 0) <= 0 ? '' : (int) ($settings['trustpilot_max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider'); ?>" />
                                         <p class="description"><?php esc_html_e('Leave empty to fetch all available reviews (can consume more Apify credits).', 'dope-studio-business-reviews-slider'); ?></p>
                                     </td>
                                 </tr>
@@ -527,6 +591,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                                 <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Auto-fetch cron', 'dope-studio-business-reviews-slider'); ?></th>
                                     <td>
+                                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="0" />
                                         <label for="grs_cron_enabled">
                                             <input id="grs_cron_enabled" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="1" <?php checked((int) ($settings['cron_enabled'] ?? 0), 1); ?> />
                                             <?php esc_html_e('Enable scheduled automatic fetch', 'dope-studio-business-reviews-slider'); ?>
@@ -567,6 +632,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                                 <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Data cleanup', 'dope-studio-business-reviews-slider'); ?></th>
                                     <td>
+                                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[delete_on_uninstall]" value="0" />
                                         <label for="grs_delete_on_uninstall">
                                             <input id="grs_delete_on_uninstall" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[delete_on_uninstall]" value="1" <?php checked((int) ($settings['delete_on_uninstall'] ?? 0), 1); ?> />
                                             <?php esc_html_e('Delete all plugin data when uninstalling the plugin', 'dope-studio-business-reviews-slider'); ?>
@@ -584,11 +650,11 @@ class DSBRS_Business_Reviews_Slider_Widget
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                                    <th scope="row"><?php esc_html_e('Dots navigation', 'dope-studio-business-reviews-slider'); ?></th>
+                                    <th scope="row"><?php esc_html_e('Progress bar', 'dope-studio-business-reviews-slider'); ?></th>
                                     <td>
                                         <label for="grs_show_dots_default">
                                             <input id="grs_show_dots_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_dots_default]" value="1" <?php checked((int) ($settings['show_dots_default'] ?? 1), 1); ?> />
-                                            <?php esc_html_e('Show pagination dots', 'dope-studio-business-reviews-slider'); ?>
+                                            <?php esc_html_e('Show slider progress bar', 'dope-studio-business-reviews-slider'); ?>
                                         </label>
                                     </td>
                                 </tr>
@@ -617,6 +683,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                                             <option value="auto" <?php selected(($settings['rating_mode_default'] ?? 'auto'), 'auto'); ?>><?php esc_html_e('Auto (from fetched reviews)', 'dope-studio-business-reviews-slider'); ?></option>
                                             <option value="manual" <?php selected(($settings['rating_mode_default'] ?? ''), 'manual'); ?>><?php esc_html_e('Manual', 'dope-studio-business-reviews-slider'); ?></option>
                                         </select>
+                                        <p class="description"><?php esc_html_e('Apify does not provide a dedicated business-wide star rating field. Auto mode calculates rating from fetched reviews and may differ from your public profile rating.', 'dope-studio-business-reviews-slider'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
@@ -652,7 +719,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><label for="grs_display_limit_default"><?php esc_html_e('Reviews to display', 'dope-studio-business-reviews-slider'); ?></label></th>
                                     <td>
-                                        <input id="grs_display_limit_default" type="number" min="6" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[display_limit_default]" value="<?php echo esc_attr((string) (($settings['display_limit_default'] ?? 0) === 0 ? '' : ($settings['display_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider'); ?>" />
+                                        <input id="grs_display_limit_default" type="number" min="6" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[display_limit_default]" value="<?php echo esc_attr((string) ((int) ($settings['display_limit_default'] ?? 0) <= 0 ? '' : (int) ($settings['display_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider'); ?>" />
                                         <p class="description"><?php esc_html_e('Frontend only: limit shown reviews. Leave empty to show all fetched reviews. Minimum when set: 6. Applied after filters (no-comment/rating).', 'dope-studio-business-reviews-slider'); ?></p>
                                     </td>
                                 </tr>
@@ -731,11 +798,11 @@ class DSBRS_Business_Reviews_Slider_Widget
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
-                                    <th scope="row"><?php esc_html_e('Dots navigation', 'dope-studio-business-reviews-slider'); ?></th>
+                                    <th scope="row"><?php esc_html_e('Progress bar', 'dope-studio-business-reviews-slider'); ?></th>
                                     <td>
                                         <label for="grs_trustpilot_show_dots_default">
                                             <input id="grs_trustpilot_show_dots_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_show_dots_default]" value="1" <?php checked((int) ($settings['trustpilot_show_dots_default'] ?? 1), 1); ?> />
-                                            <?php esc_html_e('Show pagination dots', 'dope-studio-business-reviews-slider'); ?>
+                                            <?php esc_html_e('Show slider progress bar', 'dope-studio-business-reviews-slider'); ?>
                                         </label>
                                     </td>
                                 </tr>
@@ -768,7 +835,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                                 <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
                                     <th scope="row"><label for="grs_trustpilot_display_limit_default"><?php esc_html_e('Reviews to display', 'dope-studio-business-reviews-slider'); ?></label></th>
                                     <td>
-                                        <input id="grs_trustpilot_display_limit_default" type="number" min="6" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_display_limit_default]" value="<?php echo esc_attr((string) (($settings['trustpilot_display_limit_default'] ?? 0) === 0 ? '' : ($settings['trustpilot_display_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider'); ?>" />
+                                        <input id="grs_trustpilot_display_limit_default" type="number" min="6" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_display_limit_default]" value="<?php echo esc_attr((string) ((int) ($settings['trustpilot_display_limit_default'] ?? 0) <= 0 ? '' : (int) ($settings['trustpilot_display_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider'); ?>" />
                                         <p class="description"><?php esc_html_e('Frontend only: limit shown reviews. Leave empty to show all fetched reviews. Minimum when set: 6. Applied after filters (no-comment/rating).', 'dope-studio-business-reviews-slider'); ?></p>
                                     </td>
                                 </tr>
@@ -834,6 +901,16 @@ class DSBRS_Business_Reviews_Slider_Widget
                         </table>
                         <?php submit_button(__('Save settings', 'dope-studio-business-reviews-slider')); ?>
                     </form>
+
+                    <div class="grs-import-row"<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                        <h3 style="margin:8px 0 6px;"><?php esc_html_e('Import from Lite', 'dope-studio-business-reviews-slider'); ?></h3>
+                        <p class="description" style="margin:0 0 8px;"><?php esc_html_e('Bring over Google settings and cached reviews from Dope Studio Business Reviews Slider Lite.', 'dope-studio-business-reviews-slider'); ?></p>
+                        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                            <input type="hidden" name="action" value="dsbrs_import_lite_data" />
+                            <?php wp_nonce_field('dsbrs_import_lite_data', 'dsbrs_import_lite_nonce'); ?>
+                            <button type="submit" class="button button-secondary"><?php esc_html_e('Import Lite Data', 'dope-studio-business-reviews-slider'); ?></button>
+                        </form>
+                    </div>
 
                     <div class="grs-fetch-row"<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
                         <button type="button" class="button button-primary grs-fetch-btn" data-grs-fetch-scope="all">

@@ -4,7 +4,7 @@ Tags: reviews, google reviews, slider, widget, google
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.9
+Stable tag: 1.0.10
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -19,7 +19,7 @@ Display unlimited Google reviews in a beautiful slider — completely free. No A
 2. Set **Max reviews** to a small value (for example 1-5).
 3. Enable daily cron.
 
-After that, your stored reviews are preserved, and each cron run appends only newly discovered unique reviews.
+After that, your stored reviews are preserved, and each cron run appends only newly discovered unique reviews. This preserves tokens/quota.
 
 The plugin uses [Apify](https://apify.com) to fetch your reviews. Apify offers a generous free tier that covers most small and medium businesses with no credit card required. You're in control of your own account and your own data.
 
@@ -259,6 +259,11 @@ In your own WordPress database. The plugin caches fetched reviews locally so the
 ---
 
 == Changelog ==
+
+= 1.0.9 =
+* Improved cron guidance wording for clarity.
+* Moved the daily token-saving workflow explanation to the cron timing section.
+* Clarified that daily full fetches can exhaust Apify quota and recommended 1-5 max reviews for daily cron after the initial full import.
 
 = 1.0.8 =
 * Removed "Cron fetch scope" from Lite settings (Lite is Google-only, so scope selection is unnecessary).

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider
  * Description: Fetch and display Google and Trustpilot reviews with a customizable slider widget.
- * Version: 1.0.8
+ * Version: 1.0.9
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * License: GPL-2.0+
@@ -598,7 +598,6 @@ class DSBRS_Business_Reviews_Slider_Widget
                                             <input id="grs_cron_enabled" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="1" <?php checked((int) ($settings['cron_enabled'] ?? 0), 1); ?> />
                                             <?php esc_html_e('Enable scheduled automatic fetch', 'dope-studio-business-reviews-slider'); ?>
                                         </label>
-                                        <p class="description"><?php esc_html_e('Fresh reviews every day setup: run one full fetch first with Max reviews left empty in the Google and Trustpilot platform tabs, then set Max reviews to 1-5 there and enable daily cron here. Existing stored reviews stay, and only new unique reviews are added. This keeps Apify token usage low and helps avoid exhausting your monthly quota.', 'dope-studio-business-reviews-slider'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
@@ -618,7 +617,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                                     <td>
                                         <input id="grs_cron_time" type="time" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_time]" value="<?php echo esc_attr((string) ($settings['cron_time'] ?? '03:00')); ?>" />
                                         <p class="description"><?php esc_html_e('Site local time. The event repeats based on selected frequency.', 'dope-studio-business-reviews-slider'); ?></p>
-                                        <p class="description" style="color:#b32d2e;"><?php esc_html_e('Tip: Avoid running every day if possible. Frequent runs may exhaust free Apify credits/tokens.', 'dope-studio-business-reviews-slider'); ?></p>
+                                        <p class="description" style="color:#b32d2e;"><?php esc_html_e('Tip: Avoid running daily full fetches of all reviews. For daily cron, run one full fetch first with Max reviews empty in the Google and Trustpilot platform tabs, then set Max reviews to 1-5 there. Existing stored reviews are kept and only new unique reviews are added, which helps avoid exhausting your Apify monthly quota.', 'dope-studio-business-reviews-slider'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>

@@ -4,7 +4,7 @@ Tags: reviews, google reviews, trustpilot, slider
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.6
+Stable tag: 1.0.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -16,11 +16,18 @@ By [Dope Studio](https://profiles.wordpress.org/dopestudio)
 
 Dope Studio Business Reviews Slider is a WordPress plugin that fetches and displays customer reviews in responsive sliders.
 
+**Fresh reviews every day (recommended setup):**
+1. Run your first fetch with **Max reviews** left empty to import your full history.
+2. Set **Max reviews** to a small value (for example 1-5).
+3. Enable daily cron.
+
+From then on, previously stored reviews are kept, and each cron run adds only newly found unique reviews.
+
 - **Display unlimited Google and Trustpilot reviews for free**  
 No artificial caps, no paid tiers just to show more reviews. Fetch hundreds or thousands and display as many as you want.
 
 - **Beautiful, responsive review sliders out of the box**  
-Modern, clean sliders with swipe, autoplay, dots and per-device layouts, no page builders or extra styling plugins needed.
+Modern, clean sliders with swipe, autoplay, progress bar pagination and per-device layouts, no page builders or extra styling plugins needed.
 
 - **Automatic syncing or manual control, your choice**  
 Fetch reviews on demand or keep them fresh automatically with scheduled updates via WP-Cron.
@@ -72,7 +79,7 @@ This plugin connects to third-party services to fetch review data and optional r
 - Dark and light themes
 - Autoplay + interval
 - Infinite loop mode
-- Dots navigation
+- Progress bar pagination
 - Mobile/tablet swipe
 - Per-device cards per view
 - Optional top summary block
@@ -290,6 +297,12 @@ Current option keys:
 ---
 
 ## 11) Changelog (local)
+
+### 1.0.8
+- New incremental fetch workflow: initial full import + daily small-limit updates
+- Merge + dedupe logic now keeps existing stored reviews and appends only new unique reviews
+- Added admin guidance under Fetch and Cron settings for the recommended 1-5 daily strategy
+- Added clear token-usage guidance to help avoid exhausting Apify monthly quota
 
 ### 1.0.6
 - Frontend pagination switched from dots to progress bar (Google + Trustpilot)

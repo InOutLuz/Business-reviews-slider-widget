@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider
  * Description: Fetch and display Google and Trustpilot reviews with a customizable slider widget.
- * Version: 1.0.6
+ * Version: 1.0.8
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * License: GPL-2.0+
@@ -530,6 +530,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                                     <td>
                                         <input id="grs_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[max_reviews]" value="<?php echo esc_attr((string) ((int) ($settings['max_reviews'] ?? 0) <= 0 ? '' : (int) ($settings['max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider'); ?>" />
                                         <p class="description"><?php esc_html_e('Leave empty to fetch all available reviews (can consume more Apify credits).', 'dope-studio-business-reviews-slider'); ?></p>
+                                        <p class="description"><?php esc_html_e('Recommended workflow: fetch all reviews once initially, then set this to 1-5 for daily cron. Existing stored reviews are kept and only new unique reviews are added. This keeps Apify token usage low and helps avoid exhausting your monthly quota.', 'dope-studio-business-reviews-slider'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
@@ -549,6 +550,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                                     <td>
                                         <input id="grs_trustpilot_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_max_reviews]" value="<?php echo esc_attr((string) ((int) ($settings['trustpilot_max_reviews'] ?? 0) <= 0 ? '' : (int) ($settings['trustpilot_max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider'); ?>" />
                                         <p class="description"><?php esc_html_e('Leave empty to fetch all available reviews (can consume more Apify credits).', 'dope-studio-business-reviews-slider'); ?></p>
+                                        <p class="description"><?php esc_html_e('Recommended workflow: fetch all reviews once initially, then set this to 1-5 for daily cron. Existing stored reviews are kept and only new unique reviews are added. This keeps Apify token usage low and helps avoid exhausting your monthly quota.', 'dope-studio-business-reviews-slider'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
@@ -596,6 +598,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                                             <input id="grs_cron_enabled" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="1" <?php checked((int) ($settings['cron_enabled'] ?? 0), 1); ?> />
                                             <?php esc_html_e('Enable scheduled automatic fetch', 'dope-studio-business-reviews-slider'); ?>
                                         </label>
+                                        <p class="description"><?php esc_html_e('Fresh reviews every day setup: run one full fetch first with Max reviews left empty in the Google and Trustpilot platform tabs, then set Max reviews to 1-5 there and enable daily cron here. Existing stored reviews stay, and only new unique reviews are added. This keeps Apify token usage low and helps avoid exhausting your monthly quota.', 'dope-studio-business-reviews-slider'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
@@ -1305,7 +1308,13 @@ class DSBRS_Business_Reviews_Slider_Widget
         }
 
         $reviews = $this->normalise_reviews($items);
-        $totalReviews = $this->extract_total_reviews($items, count($reviews));
+        $existingCache = get_option(self::CACHE_OPTION, []);
+        $existingReviews = isset($existingCache['reviews']) && is_array($existingCache['reviews'])
+            ? $existingCache['reviews']
+            : [];
+        $mergedReviews = $this->merge_unique_reviews($existingReviews, $reviews);
+        $totalReviews = $this->extract_total_reviews($items, count($mergedReviews));
+        $totalReviews = max($totalReviews, count($mergedReviews));
         $placesSummary = [];
 
         if ($usePlacesApiSummary && $placeId !== '' && $placesApiKey !== '') {
@@ -1313,7 +1322,7 @@ class DSBRS_Business_Reviews_Slider_Widget
         }
 
         update_option(self::CACHE_OPTION, [
-            'reviews'              => $reviews,
+            'reviews'              => $mergedReviews,
             'total_reviews'        => $totalReviews,
             'places_rating'        => isset($placesSummary['rating']) ? (float) $placesSummary['rating'] : 0,
             'places_total_reviews' => isset($placesSummary['total_reviews']) ? absint($placesSummary['total_reviews']) : 0,
@@ -1400,10 +1409,16 @@ class DSBRS_Business_Reviews_Slider_Widget
         }
 
         $reviews = $this->normalise_trustpilot_reviews($items);
-        $totalReviews = $this->extract_total_reviews($items, count($reviews));
+        $existingCache = get_option(self::TRUSTPILOT_CACHE_OPTION, []);
+        $existingReviews = isset($existingCache['reviews']) && is_array($existingCache['reviews'])
+            ? $existingCache['reviews']
+            : [];
+        $mergedReviews = $this->merge_unique_reviews($existingReviews, $reviews);
+        $totalReviews = $this->extract_total_reviews($items, count($mergedReviews));
+        $totalReviews = max($totalReviews, count($mergedReviews));
 
         update_option(self::TRUSTPILOT_CACHE_OPTION, [
-            'reviews'        => $reviews,
+            'reviews'        => $mergedReviews,
             'total_reviews'  => $totalReviews,
             'company_domain' => sanitize_text_field($domain),
             'company_url'    => esc_url_raw($trustpilotUrl),
@@ -1597,6 +1612,45 @@ class DSBRS_Business_Reviews_Slider_Widget
         }
 
         return array_values($out);
+    }
+
+    private function merge_unique_reviews(array $existingReviews, array $fetchedReviews): array
+    {
+        $map = [];
+
+        foreach ($existingReviews as $review) {
+            if (! is_array($review)) {
+                continue;
+            }
+
+            $map[$this->review_dedupe_key($review)] = $review;
+        }
+
+        foreach ($fetchedReviews as $review) {
+            if (! is_array($review)) {
+                continue;
+            }
+
+            $map[$this->review_dedupe_key($review)] = $review;
+        }
+
+        return $this->sort_reviews_newest_first(array_values($map));
+    }
+
+    private function review_dedupe_key(array $review): string
+    {
+        $url = trim((string) ($review['url'] ?? ''));
+        if ($url !== '') {
+            return 'url:' . $url;
+        }
+
+        $author = mb_strtolower(trim((string) ($review['author'] ?? '')));
+        $date = trim((string) ($review['date'] ?? ''));
+        $rating = number_format((float) ($review['rating'] ?? 0), 2, '.', '');
+        $headline = mb_strtolower(trim((string) ($review['headline'] ?? '')));
+        $text = mb_strtolower(trim((string) ($review['text'] ?? '')));
+
+        return 'hash:' . md5($author . '|' . $date . '|' . $rating . '|' . $headline . '|' . $text);
     }
 
     private function first_mixed_by_keys(array $source, array $keys)

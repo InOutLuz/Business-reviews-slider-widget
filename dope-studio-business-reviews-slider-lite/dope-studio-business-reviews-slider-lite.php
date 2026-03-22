@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider Lite
  * Description: Fetch and display Google reviews with a customizable slider widget.
- * Version: 1.0.6
+ * Version: 1.0.8
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * License: GPL-2.0+
@@ -206,8 +206,8 @@ class DSBRSL_Google_Reviews_Slider_Lite
         }
         $output['cron_time'] = $cronTime;
 
-        $cronFetchScope = isset($input['cron_fetch_scope']) ? sanitize_key((string) $input['cron_fetch_scope']) : 'enabled';
-        $output['cron_fetch_scope'] = in_array($cronFetchScope, ['enabled', 'all', 'google'], true) ? $cronFetchScope : 'enabled';
+        // Lite is Google-only, so cron fetch scope is fixed.
+        $output['cron_fetch_scope'] = 'enabled';
 
         $output['delete_on_uninstall'] = $this->sanitize_checkbox_value($input, 'delete_on_uninstall');
 
@@ -432,6 +432,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
                                     <td>
                                         <input id="grs_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[max_reviews]" value="<?php echo esc_attr((string) ((int) ($settings['max_reviews'] ?? 0) <= 0 ? '' : (int) ($settings['max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider-lite'); ?>" />
                                         <p class="description"><?php esc_html_e('Leave empty to fetch all available reviews (can consume more Apify credits).', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                                        <p class="description"><?php esc_html_e('Recommended workflow: fetch all reviews once initially, then set this to 1-5 for daily cron. Existing stored reviews are kept and only new unique reviews are added. This keeps Apify token usage low and helps avoid exhausting your monthly quota.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
@@ -483,6 +484,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
                                             <input id="grs_cron_enabled" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="1" <?php checked((int) ($settings['cron_enabled'] ?? 0), 1); ?> />
                                             <?php esc_html_e('Enable scheduled automatic fetch', 'dope-studio-business-reviews-slider-lite'); ?>
                                         </label>
+                                        <p class="description"><?php esc_html_e('Fresh reviews every day setup: run one full fetch first with Max reviews left empty in the Google platform tab, then set Max reviews to 1-5 there and enable daily cron here. Existing stored reviews stay, and only new unique reviews are added. This keeps Apify token usage low and helps avoid exhausting your monthly quota.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
@@ -503,16 +505,6 @@ class DSBRSL_Google_Reviews_Slider_Lite
                                         <input id="grs_cron_time" type="time" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_time]" value="<?php echo esc_attr((string) ($settings['cron_time'] ?? '03:00')); ?>" />
                                         <p class="description"><?php esc_html_e('Site local time. The event repeats based on selected frequency.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                         <p class="description" style="color:#b32d2e;"><?php esc_html_e('Tip: Avoid running every day if possible. Frequent runs may exhaust free Apify credits/tokens.', 'dope-studio-business-reviews-slider-lite'); ?></p>
-                                    </td>
-                                </tr>
-                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_cron_fetch_scope"><?php esc_html_e('Cron fetch scope', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
-                                    <td>
-                                        <select id="grs_cron_fetch_scope" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_fetch_scope]">
-                                            <option value="enabled" <?php selected(($settings['cron_fetch_scope'] ?? 'enabled'), 'enabled'); ?>><?php esc_html_e('Enabled platforms only', 'dope-studio-business-reviews-slider-lite'); ?></option>
-                                            <option value="all" <?php selected(($settings['cron_fetch_scope'] ?? 'enabled'), 'all'); ?>><?php esc_html_e('Fetch all (Google)', 'dope-studio-business-reviews-slider-lite'); ?></option>
-                                            <option value="google" <?php selected(($settings['cron_fetch_scope'] ?? 'enabled'), 'google'); ?>><?php esc_html_e('Fetch only Google', 'dope-studio-business-reviews-slider-lite'); ?></option>
-                                        </select>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
@@ -741,13 +733,8 @@ class DSBRSL_Google_Reviews_Slider_Lite
             return;
         }
 
-        $scope = isset($settings['cron_fetch_scope']) ? sanitize_key((string) $settings['cron_fetch_scope']) : 'enabled';
-        if (! in_array($scope, ['enabled', 'all', 'google'], true)) {
-            $scope = 'enabled';
-        }
-
         $googleEnabled = ! isset($settings['enable_google']) || (int) $settings['enable_google'] === 1;
-        $shouldFetch = $scope === 'all' || $scope === 'google' || ($scope === 'enabled' && $googleEnabled);
+        $shouldFetch = $googleEnabled;
         if (! $shouldFetch) {
             return;
         }
@@ -949,7 +936,13 @@ class DSBRSL_Google_Reviews_Slider_Lite
         }
 
         $reviews = $this->normalise_reviews($items);
-        $totalReviews = $this->extract_total_reviews($items, count($reviews));
+        $existingCache = get_option(self::CACHE_OPTION, []);
+        $existingReviews = isset($existingCache['reviews']) && is_array($existingCache['reviews'])
+            ? $existingCache['reviews']
+            : [];
+        $mergedReviews = $this->merge_unique_reviews($existingReviews, $reviews);
+        $totalReviews = $this->extract_total_reviews($items, count($mergedReviews));
+        $totalReviews = max($totalReviews, count($mergedReviews));
         $placesSummary = [];
 
         if ($usePlacesApiSummary && $placeId !== '' && $placesApiKey !== '') {
@@ -957,7 +950,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
         }
 
         update_option(self::CACHE_OPTION, [
-            'reviews'              => $reviews,
+            'reviews'              => $mergedReviews,
             'total_reviews'        => $totalReviews,
             'places_rating'        => isset($placesSummary['rating']) ? (float) $placesSummary['rating'] : 0,
             'places_total_reviews' => isset($placesSummary['total_reviews']) ? absint($placesSummary['total_reviews']) : 0,
@@ -1007,6 +1000,45 @@ class DSBRSL_Google_Reviews_Slider_Lite
         }
 
         return $out;
+    }
+
+    private function merge_unique_reviews(array $existingReviews, array $fetchedReviews): array
+    {
+        $map = [];
+
+        foreach ($existingReviews as $review) {
+            if (! is_array($review)) {
+                continue;
+            }
+
+            $map[$this->review_dedupe_key($review)] = $review;
+        }
+
+        foreach ($fetchedReviews as $review) {
+            if (! is_array($review)) {
+                continue;
+            }
+
+            $map[$this->review_dedupe_key($review)] = $review;
+        }
+
+        return $this->sort_reviews_newest_first(array_values($map));
+    }
+
+    private function review_dedupe_key(array $review): string
+    {
+        $url = trim((string) ($review['url'] ?? ''));
+        if ($url !== '') {
+            return 'url:' . $url;
+        }
+
+        $author = mb_strtolower(trim((string) ($review['author'] ?? '')));
+        $date = trim((string) ($review['date'] ?? ''));
+        $rating = number_format((float) ($review['rating'] ?? 0), 2, '.', '');
+        $headline = mb_strtolower(trim((string) ($review['headline'] ?? '')));
+        $text = mb_strtolower(trim((string) ($review['text'] ?? '')));
+
+        return 'hash:' . md5($author . '|' . $date . '|' . $rating . '|' . $headline . '|' . $text);
     }
 
     public function render_shortcode(array $atts = []): string

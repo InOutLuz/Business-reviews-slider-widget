@@ -1,10 +1,10 @@
-=== Dope Studio Business Reviews Slider Lite ===
+=== Dope Studio Business Reviews Slider Lite (Display unlimited Google reviews for free, fetch every day)===
 Contributors: dopestudio
-Tags: reviews, google reviews, slider
+Tags: reviews, google reviews, slider, widget, google
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.6
+Stable tag: 1.0.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -13,6 +13,13 @@ Display unlimited Google reviews in a beautiful slider — completely free. No A
 == Description ==
 
 **Show unlimited Google reviews on your site for free.** Dope Studio Business Reviews Slider Lite fetches and displays your Google reviews in a polished, responsive slider — with no limits on how many reviews you can show.
+
+**Fresh reviews every day (recommended setup):**
+1. Run your first fetch with **Max reviews** left empty to import your full review history.
+2. Set **Max reviews** to a small value (for example 1-5).
+3. Enable daily cron.
+
+After that, your stored reviews are preserved, and each cron run appends only newly discovered unique reviews.
 
 The plugin uses [Apify](https://apify.com) to fetch your reviews. Apify offers a generous free tier that covers most small and medium businesses with no credit card required. You're in control of your own account and your own data.
 
@@ -45,7 +52,7 @@ Getting Google reviews onto your site has always meant either paying for an expe
 - Dark and light themes
 - Autoplay with custom interval
 - Optional infinite loop
-- Dot navigation
+- Progress bar pagination
 - Mobile and tablet swipe support
 - Configurable cards per view across mobile, tablet, and desktop
 - Optional summary header block showing overall rating and review count
@@ -143,7 +150,6 @@ That's it. Your reviews are live.
 - Enable cron auto-fetch
 - Fetch frequency
 - Fetch start time
-- Fetch scope
 
 **Optional Places summary**
 - Google Places API key
@@ -253,6 +259,14 @@ In your own WordPress database. The plugin caches fetched reviews locally so the
 ---
 
 == Changelog ==
+
+= 1.0.8 =
+* Removed "Cron fetch scope" from Lite settings (Lite is Google-only, so scope selection is unnecessary).
+* Simplified scheduled fetch logic to use the single Lite platform flow.
+* New incremental fetch workflow: run one full import, then use 1-5 max reviews for daily cron.
+* Merge + dedupe logic now keeps existing stored reviews and appends only new unique reviews.
+* Added clearer admin guidance under Fetch and Cron settings for the recommended daily setup.
+* Added token-usage guidance to help avoid exhausting Apify monthly quota.
 
 = 1.0.6 =
 * Frontend pagination switched from dots to progress bar.

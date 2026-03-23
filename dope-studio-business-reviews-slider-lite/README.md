@@ -4,7 +4,7 @@ Tags: reviews, google reviews, slider, widget, google
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.10
+Stable tag: 1.0.12
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -188,6 +188,8 @@ All settings from the admin page are used as defaults. You can override any of t
 
 `[dsbrsl_google_reviews_slider theme="light" limit="10" autoplay="1" desktop="3"]`
 
+If you add attributes in a shortcode, those values override the admin settings for that shortcode instance only. This lets you use different widget variations on different pages.
+
 **All available attributes:**
 - `theme="dark|light"`
 - `limit="0"` — number of reviews to display (0 = all)
@@ -205,6 +207,8 @@ All settings from the admin page are used as defaults. You can override any of t
 - `manual_rating="0-5"`
 - `min_rating="0|2|3|4|5"`
 - `show_no_comment="0|1"`
+
+`show_no_comment="1"` hides ratings-only reviews without text comments.
 
 ---
 
@@ -259,6 +263,16 @@ In your own WordPress database. The plugin caches fetched reviews locally so the
 ---
 
 == Changelog ==
+
+= 1.0.11 =
+* Clarified shortcode behavior: shortcode attributes override admin defaults per instance.
+* Added shortcode guidance for using different slider/widget variants on different pages.
+* Clarified `show_no_comment="1"` behavior in shortcode documentation.
+
+= 1.0.10 =
+* Fixed autoplay interval handling so custom interval values apply reliably in the Google slider.
+* Added compatibility fallback for legacy autoplay interval data attribute naming in frontend slider initialization.
+* Bumped frontend script version to force cache refresh after update.
 
 = 1.0.9 =
 * Improved cron guidance wording for clarity.

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider Lite
  * Description: Fetch and display Google reviews with a customizable slider widget.
- * Version: 1.0.9
+ * Version: 1.0.11
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * License: GPL-2.0+
@@ -269,7 +269,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
             'dsbrsl-frontend-script',
             plugin_dir_url(__FILE__) . 'assets/frontend.js',
             [],
-            '1.0.5',
+            '1.0.10',
             true
         );
     }
@@ -671,6 +671,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
                     <p><code>[dsbrsl_google_reviews_slider]</code></p>
                     <p><?php esc_html_e('Optional attributes:', 'dope-studio-business-reviews-slider-lite'); ?> <code>theme="dark|light" limit="0" autoplay="1" interval="5500" loop="0|1" show_dots="0|1" swipe="0|1" mobile="1-6" tablet="1-6" desktop="1-6" show_summary="0|1" show_read_on_google="0|1" rating_mode="auto|manual" manual_rating="0-5" min_rating="0|2|3|4|5" show_no_comment="1"</code></p>
                     <p class="description"><?php esc_html_e('These attributes are optional. If you configure settings in the admin panel, use the default shortcode without attributes and those settings will be applied automatically.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                    <p class="description"><?php esc_html_e('If you add attributes in the shortcode, they override the admin settings for that shortcode instance only. This lets you place different slider variations on different pages.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                     <p class="description"><?php esc_html_e('show_no_comment="1" hides ratings-only reviews without text comments.', 'dope-studio-business-reviews-slider-lite'); ?></p>
 
                     <hr />
@@ -1157,7 +1158,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
 
         ob_start();
         ?>
-        <section class="grs-slider-shell grs-theme-<?php echo esc_attr($theme); ?>" data-grs-slider data-autoplay="<?php echo esc_attr($autoplay); ?>" data-interval="<?php echo esc_attr((string) $interval); ?>" data-loop="<?php echo esc_attr($loop); ?>" data-show-dots="<?php echo esc_attr($showDots); ?>" data-swipe="<?php echo esc_attr($swipe); ?>" data-mobile="<?php echo esc_attr((string) $mobileCols); ?>" data-tablet="<?php echo esc_attr((string) $tabletCols); ?>" data-desktop="<?php echo esc_attr((string) $desktopCols); ?>">
+        <section class="grs-slider-shell grs-theme-<?php echo esc_attr($theme); ?>" data-grs-slider data-autoplay="<?php echo esc_attr($autoplay); ?>" data-interval="<?php echo esc_attr((string) $interval); ?>" data-autoplay-interval="<?php echo esc_attr((string) $interval); ?>" data-loop="<?php echo esc_attr($loop); ?>" data-show-dots="<?php echo esc_attr($showDots); ?>" data-swipe="<?php echo esc_attr($swipe); ?>" data-mobile="<?php echo esc_attr((string) $mobileCols); ?>" data-tablet="<?php echo esc_attr((string) $tabletCols); ?>" data-desktop="<?php echo esc_attr((string) $desktopCols); ?>">
             <?php if (! empty($reviews) && $showSummary === '1') :
                 $sum = 0;
                 foreach ($reviews as $r) {

@@ -4,7 +4,7 @@ Tags: reviews, google reviews, trustpilot, slider
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.9
+Stable tag: 1.0.11
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -190,6 +190,10 @@ Optional:
 
 ## 6) Shortcodes
 
+Default behavior: if you use a shortcode without attributes, admin settings are applied.
+
+If you add attributes, they override admin settings for that shortcode instance only. This allows different slider/widget variants on different pages.
+
 ## Google
 `[dsbrs_google_reviews_slider]`
 
@@ -297,6 +301,16 @@ Current option keys:
 ---
 
 ## 11) Changelog (local)
+
+### 1.0.11
+- Clarified shortcode behavior: attributes override admin defaults per shortcode instance
+- Added shortcode guidance for using different widget variants across different pages
+- Clarified `show_no_comment="1"` behavior in shortcode docs
+
+### 1.0.10
+- Fixed autoplay interval handling so custom interval values are applied reliably in Google and Trustpilot sliders
+- Added compatibility support for legacy interval data attribute naming in frontend slider initialization
+- Bumped frontend script version to ensure cache refresh after update
 
 ### 1.0.9
 - Improved cron guidance wording for clarity (Google + Trustpilot)

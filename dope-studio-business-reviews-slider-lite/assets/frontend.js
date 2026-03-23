@@ -194,8 +194,19 @@
     };
 
     const autoplayEnabled = root.getAttribute('data-autoplay') === '1';
-    const intervalMs = Number.parseInt(root.getAttribute('data-interval') || '5500', 10);
-    const safeInterval = Number.isFinite(intervalMs) ? clamp(intervalMs, 1500, 20000) : 5500;
+    const resolveIntervalMs = () => {
+      const rawInterval = root.getAttribute('data-interval')
+        || root.getAttribute('data-autoplay-interval')
+        || root.getAttribute('data-autoplay-interval-ms')
+        || '5500';
+      const parsed = Number.parseFloat(rawInterval);
+
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return 5500;
+      }
+
+      return clamp(Math.round(parsed), 1500, 20000);
+    };
 
     const stopAutoplay = () => {
       if (timer) {
@@ -209,6 +220,8 @@
       if (!autoplayEnabled || maxPage() <= 0) {
         return;
       }
+      const safeInterval = resolveIntervalMs();
+
       timer = window.setInterval(() => {
         const mp = maxPage();
         if (loopEnabled) {

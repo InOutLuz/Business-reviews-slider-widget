@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider
  * Description: Fetch and display Google and Trustpilot reviews with a customizable slider widget.
- * Version: 1.0.9
+ * Version: 1.0.11
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * License: GPL-2.0+
@@ -344,7 +344,7 @@ class DSBRS_Business_Reviews_Slider_Widget
             'dsbrs-frontend-script',
             plugin_dir_url(__FILE__) . 'assets/frontend.js',
             [],
-            '1.0.5',
+            '1.0.10',
             true
         );
     }
@@ -1787,7 +1787,7 @@ class DSBRS_Business_Reviews_Slider_Widget
 
         ob_start();
         ?>
-        <section class="grs-slider-shell grs-theme-<?php echo esc_attr($theme); ?>" data-grs-slider data-autoplay="<?php echo esc_attr($autoplay); ?>" data-interval="<?php echo esc_attr((string) $interval); ?>" data-loop="<?php echo esc_attr($loop); ?>" data-show-dots="<?php echo esc_attr($showDots); ?>" data-swipe="<?php echo esc_attr($swipe); ?>" data-mobile="<?php echo esc_attr((string) $mobileCols); ?>" data-tablet="<?php echo esc_attr((string) $tabletCols); ?>" data-desktop="<?php echo esc_attr((string) $desktopCols); ?>">
+        <section class="grs-slider-shell grs-theme-<?php echo esc_attr($theme); ?>" data-grs-slider data-autoplay="<?php echo esc_attr($autoplay); ?>" data-interval="<?php echo esc_attr((string) $interval); ?>" data-autoplay-interval="<?php echo esc_attr((string) $interval); ?>" data-loop="<?php echo esc_attr($loop); ?>" data-show-dots="<?php echo esc_attr($showDots); ?>" data-swipe="<?php echo esc_attr($swipe); ?>" data-mobile="<?php echo esc_attr((string) $mobileCols); ?>" data-tablet="<?php echo esc_attr((string) $tabletCols); ?>" data-desktop="<?php echo esc_attr((string) $desktopCols); ?>">
             <?php if (! empty($reviews) && $showSummary === '1') :
                 $sum = 0;
                 foreach ($reviews as $r) {
@@ -1996,7 +1996,7 @@ class DSBRS_Business_Reviews_Slider_Widget
 
         ob_start();
         ?>
-        <section class="grs-slider-shell grs-theme-<?php echo esc_attr($theme); ?> grs-platform-trustpilot" data-grs-slider data-autoplay="<?php echo esc_attr($autoplay); ?>" data-interval="<?php echo esc_attr((string) $interval); ?>" data-loop="<?php echo esc_attr($loop); ?>" data-show-dots="<?php echo esc_attr($showDots); ?>" data-swipe="<?php echo esc_attr($swipe); ?>" data-mobile="<?php echo esc_attr((string) $mobileCols); ?>" data-tablet="<?php echo esc_attr((string) $tabletCols); ?>" data-desktop="<?php echo esc_attr((string) $desktopCols); ?>">
+        <section class="grs-slider-shell grs-theme-<?php echo esc_attr($theme); ?> grs-platform-trustpilot" data-grs-slider data-autoplay="<?php echo esc_attr($autoplay); ?>" data-interval="<?php echo esc_attr((string) $interval); ?>" data-autoplay-interval="<?php echo esc_attr((string) $interval); ?>" data-loop="<?php echo esc_attr($loop); ?>" data-show-dots="<?php echo esc_attr($showDots); ?>" data-swipe="<?php echo esc_attr($swipe); ?>" data-mobile="<?php echo esc_attr((string) $mobileCols); ?>" data-tablet="<?php echo esc_attr((string) $tabletCols); ?>" data-desktop="<?php echo esc_attr((string) $desktopCols); ?>">
             <?php if (! empty($reviews) && $showSummary === '1') :
                 $autoAvg = $this->trustpilot_bayesian_score($reviews);
                 $avg = $ratingMode === 'manual' ? $manualRating : $autoAvg;

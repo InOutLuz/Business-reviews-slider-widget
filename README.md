@@ -4,7 +4,7 @@ Tags: reviews, google reviews, trustpilot, slider
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.11
+Stable tag: 1.0.12
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,12 @@ This plugin connects to third-party services to fetch review data and optional r
 - Data sent: Google Places API key and Google Place ID.
 - Terms: https://cloud.google.com/maps-platform/terms
 - Privacy policy: https://policies.google.com/privacy
+
+3) Dope Studio update metadata endpoint (plugin updates)
+- Purpose: checks whether a newer Pro plugin version is available and provides package metadata for WordPress updates UI.
+- When data is sent: when WordPress performs plugin update checks (for example on updates screens / scheduled checks).
+- Data sent: basic WordPress update request data (site URL, plugin versions, WordPress/PHP versions, locale) as part of standard update-check requests.
+- Endpoint: https://products.dopestudio.co.uk/brs/downloads/dope-studio-business-reviews-slider-update.json
 
 ---
 
@@ -301,6 +307,11 @@ Current option keys:
 ---
 
 ## 11) Changelog (local)
+
+### 1.0.12
+- Added built-in Pro plugin update checker using a remote metadata JSON endpoint
+- Added plugin information support so WordPress can show update details for Pro releases
+- Added `Update URI` header to ensure correct update source handling for the standalone Pro package
 
 ### 1.0.11
 - Clarified shortcode behavior: attributes override admin defaults per shortcode instance

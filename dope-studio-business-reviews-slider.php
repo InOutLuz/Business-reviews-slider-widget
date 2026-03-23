@@ -2,9 +2,10 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider
  * Description: Fetch and display Google and Trustpilot reviews with a customizable slider widget.
- * Version: 1.0.11
+ * Version: 1.0.12
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
+ * Update URI: https://products.dopestudio.co.uk/brs/
  * License: GPL-2.0+
  * Text Domain: dope-studio-business-reviews-slider
  * Domain Path: /languages
@@ -16,6 +17,10 @@ if (! defined('ABSPATH')) {
 
 class DSBRS_Business_Reviews_Slider_Widget
 {
+    private const PLUGIN_SLUG = 'dope-studio-business-reviews-slider';
+    private const UPDATE_METADATA_URL = 'https://products.dopestudio.co.uk/brs/downloads/dope-studio-business-reviews-slider-update.json';
+    private const UPDATE_CACHE_TRANSIENT = 'dsbrs_update_metadata_cache';
+    private const UPDATE_CACHE_TTL = 6 * HOUR_IN_SECONDS;
     private const SETTINGS_OPTION = 'dsbrs_settings';
     private const CACHE_OPTION = 'dsbrs_reviews_cache';
     private const TRUSTPILOT_CACHE_OPTION = 'dsbrs_trustpilot_reviews_cache';
@@ -39,9 +44,137 @@ class DSBRS_Business_Reviews_Slider_Widget
         add_action('admin_post_dsbrs_import_lite_data', [$this, 'handle_import_lite_data']);
         add_action('update_option_' . self::SETTINGS_OPTION, [$this, 'on_settings_updated'], 10, 2);
         add_filter('cron_schedules', [$this, 'register_cron_schedules']);
+        add_filter('pre_set_site_transient_update_plugins', [$this, 'inject_plugin_update']);
+        add_filter('plugins_api', [$this, 'plugins_api_handler'], 20, 3);
 
         add_shortcode(self::SHORTCODE_GOOGLE, [$this, 'render_shortcode']);
         add_shortcode(self::SHORTCODE_TRUSTPILOT, [$this, 'render_trustpilot_shortcode']);
+    }
+
+    public function inject_plugin_update($transient)
+    {
+        if (! is_object($transient) || ! isset($transient->checked) || ! is_array($transient->checked)) {
+            return $transient;
+        }
+
+        $pluginBasename = plugin_basename(__FILE__);
+        if (! isset($transient->checked[$pluginBasename])) {
+            return $transient;
+        }
+
+        $metadata = $this->get_remote_update_metadata();
+        if (! is_array($metadata)) {
+            return $transient;
+        }
+
+        $newVersion = isset($metadata['version']) ? trim((string) $metadata['version']) : '';
+        if ($newVersion === '') {
+            return $transient;
+        }
+
+        $currentVersion = (string) $transient->checked[$pluginBasename];
+        if (! version_compare($newVersion, $currentVersion, '>')) {
+            return $transient;
+        }
+
+        $downloadUrl = isset($metadata['download_url']) ? esc_url_raw((string) $metadata['download_url']) : '';
+        if ($downloadUrl === '') {
+            return $transient;
+        }
+
+        $update = (object) [
+            'slug' => self::PLUGIN_SLUG,
+            'plugin' => $pluginBasename,
+            'new_version' => $newVersion,
+            'url' => isset($metadata['homepage']) ? esc_url_raw((string) $metadata['homepage']) : 'https://products.dopestudio.co.uk/brs/',
+            'package' => $downloadUrl,
+            'tested' => isset($metadata['tested']) ? sanitize_text_field((string) $metadata['tested']) : '',
+            'requires' => isset($metadata['requires']) ? sanitize_text_field((string) $metadata['requires']) : '',
+            'requires_php' => isset($metadata['requires_php']) ? sanitize_text_field((string) $metadata['requires_php']) : '',
+        ];
+
+        $transient->response[$pluginBasename] = $update;
+
+        return $transient;
+    }
+
+    public function plugins_api_handler($result, string $action, $args)
+    {
+        if ($action !== 'plugin_information' || ! is_object($args) || ! isset($args->slug)) {
+            return $result;
+        }
+
+        if ((string) $args->slug !== self::PLUGIN_SLUG) {
+            return $result;
+        }
+
+        $metadata = $this->get_remote_update_metadata();
+        if (! is_array($metadata)) {
+            return $result;
+        }
+
+        $sections = [];
+        if (isset($metadata['sections']) && is_array($metadata['sections'])) {
+            foreach ($metadata['sections'] as $key => $value) {
+                if (! is_string($key) || ! is_string($value)) {
+                    continue;
+                }
+
+                $sections[sanitize_key($key)] = wp_kses_post($value);
+            }
+        }
+
+        return (object) [
+            'name' => isset($metadata['name']) ? sanitize_text_field((string) $metadata['name']) : 'Dope Studio Business Reviews Slider',
+            'slug' => self::PLUGIN_SLUG,
+            'version' => isset($metadata['version']) ? sanitize_text_field((string) $metadata['version']) : '',
+            'author' => isset($metadata['author']) ? wp_kses_post((string) $metadata['author']) : '<a href="https://profiles.wordpress.org/dopestudio">Dope Studio</a>',
+            'author_profile' => isset($metadata['author_profile']) ? esc_url_raw((string) $metadata['author_profile']) : 'https://profiles.wordpress.org/dopestudio',
+            'homepage' => isset($metadata['homepage']) ? esc_url_raw((string) $metadata['homepage']) : 'https://products.dopestudio.co.uk/brs/',
+            'requires' => isset($metadata['requires']) ? sanitize_text_field((string) $metadata['requires']) : '',
+            'tested' => isset($metadata['tested']) ? sanitize_text_field((string) $metadata['tested']) : '',
+            'requires_php' => isset($metadata['requires_php']) ? sanitize_text_field((string) $metadata['requires_php']) : '',
+            'last_updated' => isset($metadata['last_updated']) ? sanitize_text_field((string) $metadata['last_updated']) : '',
+            'download_link' => isset($metadata['download_url']) ? esc_url_raw((string) $metadata['download_url']) : '',
+            'sections' => $sections,
+            'banners' => [],
+            'icons' => [],
+        ];
+    }
+
+    private function get_remote_update_metadata(): ?array
+    {
+        $cached = get_site_transient(self::UPDATE_CACHE_TRANSIENT);
+        if (is_array($cached)) {
+            return $cached;
+        }
+
+        $response = wp_remote_get(self::UPDATE_METADATA_URL, [
+            'timeout' => 15,
+            'headers' => [
+                'Accept' => 'application/json',
+            ],
+        ]);
+
+        if (is_wp_error($response)) {
+            return null;
+        }
+
+        $status = wp_remote_retrieve_response_code($response);
+        if ($status < 200 || $status >= 300) {
+            return null;
+        }
+
+        $body = wp_remote_retrieve_body($response);
+        $decoded = json_decode($body, true);
+
+        if (! is_array($decoded)) {
+            return null;
+        }
+
+        set_site_transient(self::UPDATE_CACHE_TRANSIENT, $decoded, self::UPDATE_CACHE_TTL);
+
+        return $decoded;
     }
 
     public static function deactivate(): void

@@ -4,7 +4,7 @@ Tags: reviews, google reviews, slider, widget, google
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.12
+Stable tag: 1.0.13
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -98,6 +98,12 @@ This plugin connects to third-party services to fetch review data and optional r
 - Data sent: your Google Places API key and Google Place ID.
 - Terms: https://cloud.google.com/maps-platform/terms
 - Privacy policy: https://policies.google.com/privacy
+
+**3. Dope Studio feedback endpoint (deactivation feedback popup only)**
+- Purpose: records optional deactivation reasons to improve the plugin.
+- When data is sent: only when a user submits the deactivation feedback popup in wp-admin.
+- Data sent: generated install ID, hashed site URL (SHA-256), site host, plugin version, WordPress/PHP version, locale, and optional feedback reason/comment/email.
+- Endpoint: https://products.dopestudio.co.uk/brs/telemetry/collect.php
 
 ---
 
@@ -263,6 +269,11 @@ In your own WordPress database. The plugin caches fetched reviews locally so the
 ---
 
 == Changelog ==
+
+= 1.0.13 =
+* Added deactivation feedback popup on the plugins screen.
+* Added "I switched to PRO version" as the first feedback option.
+* Lite now submits only deactivation feedback events to telemetry endpoint.
 
 = 1.0.11 =
 * Clarified shortcode behavior: shortcode attributes override admin defaults per instance.

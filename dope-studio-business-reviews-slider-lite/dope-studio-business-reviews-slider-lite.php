@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider Lite
  * Description: Fetch and display Google reviews with a customizable slider widget.
- * Version: 1.0.11
+ * Version: 1.0.13
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * License: GPL-2.0+
@@ -16,11 +16,15 @@ if (! defined('ABSPATH')) {
 
 class DSBRSL_Google_Reviews_Slider_Lite
 {
+    private const PLUGIN_VERSION = '1.0.13';
     private const SETTINGS_OPTION = 'dsbrsl_settings';
     private const CACHE_OPTION = 'dsbrsl_reviews_cache';
     private const SHORTCODE_GOOGLE = 'dsbrsl_google_reviews_slider';
     private const AJAX_ACTION = 'dsbrsl_fetch_reviews';
     private const CRON_HOOK = 'dsbrsl_cron_fetch_reviews';
+    private const TELEMETRY_ENDPOINT = 'https://products.dopestudio.co.uk/brs/telemetry/collect.php';
+    private const INSTALL_ID_OPTION = 'dsbrsl_install_id';
+    private const DEACTIVATE_FEEDBACK_AJAX = 'dsbrsl_deactivation_feedback';
 
     public function __construct()
     {
@@ -30,6 +34,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
         add_action('wp_enqueue_scripts', [$this, 'register_frontend_assets']);
         add_action('wp_ajax_' . self::AJAX_ACTION, [$this, 'ajax_fetch_reviews']);
+        add_action('wp_ajax_' . self::DEACTIVATE_FEEDBACK_AJAX, [$this, 'ajax_deactivation_feedback']);
         add_action(self::CRON_HOOK, [$this, 'run_scheduled_fetch']);
         add_action('update_option_' . self::SETTINGS_OPTION, [$this, 'on_settings_updated'], 10, 2);
         add_action('init', [$this, 'ensure_cron_schedule']);
@@ -230,6 +235,11 @@ class DSBRSL_Google_Reviews_Slider_Lite
 
     public function enqueue_admin_assets(string $hook): void
     {
+        if ($hook === 'plugins.php') {
+            $this->enqueue_deactivation_feedback_assets();
+            return;
+        }
+
         if ($hook !== 'toplevel_page_dsbrsl-dope-studio-business-reviews-slider-lite') {
             return;
         }
@@ -255,6 +265,203 @@ class DSBRSL_Google_Reviews_Slider_Lite
             'nonce'   => wp_create_nonce(self::AJAX_ACTION),
         ]);
     }
+
+        private function enqueue_deactivation_feedback_assets(): void
+        {
+                if (! current_user_can('activate_plugins')) {
+                        return;
+                }
+
+                $handle = 'dsbrsl-deactivation-feedback';
+                wp_register_script($handle, '', [], self::PLUGIN_VERSION, true);
+                wp_enqueue_script($handle);
+
+                $payload = [
+                        'ajaxUrl' => admin_url('admin-ajax.php'),
+                        'nonce' => wp_create_nonce(self::DEACTIVATE_FEEDBACK_AJAX),
+                        'action' => self::DEACTIVATE_FEEDBACK_AJAX,
+                        'pluginBasename' => plugin_basename(__FILE__),
+                        'title' => __('Quick feedback before you deactivate', 'dope-studio-business-reviews-slider-lite'),
+                        'subtitle' => __('What made you deactivate the plugin?', 'dope-studio-business-reviews-slider-lite'),
+                        'placeholder' => __('Optional: add a few details to help us improve', 'dope-studio-business-reviews-slider-lite'),
+                        'emailPlaceholder' => __('Optional: your email if you want a reply', 'dope-studio-business-reviews-slider-lite'),
+                        'skipLabel' => __('Skip and deactivate', 'dope-studio-business-reviews-slider-lite'),
+                        'submitLabel' => __('Submit and deactivate', 'dope-studio-business-reviews-slider-lite'),
+                        'reasons' => [
+                            ['value' => 'switched_to_pro', 'label' => __('I switched to PRO version', 'dope-studio-business-reviews-slider-lite')],
+                                ['value' => 'not_working', 'label' => __('The plugin is not working as expected', 'dope-studio-business-reviews-slider-lite')],
+                                ['value' => 'missing_feature', 'label' => __('It is missing a feature I need', 'dope-studio-business-reviews-slider-lite')],
+                                ['value' => 'hard_to_use', 'label' => __('It is hard to use or configure', 'dope-studio-business-reviews-slider-lite')],
+                                ['value' => 'switched_plugin', 'label' => __('I switched to another plugin', 'dope-studio-business-reviews-slider-lite')],
+                                ['value' => 'temporary', 'label' => __('Temporary deactivation', 'dope-studio-business-reviews-slider-lite')],
+                                ['value' => 'other', 'label' => __('Other', 'dope-studio-business-reviews-slider-lite')],
+                        ],
+                ];
+
+                wp_add_inline_script($handle, 'window.dsbrslDeactivateFeedback = ' . wp_json_encode($payload) . ';', 'before');
+
+                $script = <<<'JS'
+(function () {
+    var config = window.dsbrslDeactivateFeedback;
+    if (!config || !config.pluginBasename) {
+        return;
+    }
+
+    var deactivateLink = document.querySelector('tr[data-plugin="' + config.pluginBasename + '"] .deactivate a');
+    if (!deactivateLink) {
+        return;
+    }
+
+    var deactivateUrl = '';
+    var overlay = null;
+
+    function buildModal() {
+        if (overlay) {
+            return overlay;
+        }
+
+        overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:100000;';
+        overlay.innerHTML = '' +
+            '<div style="background:#fff;width:560px;max-width:calc(100vw - 32px);border-radius:8px;padding:20px 20px 16px;box-shadow:0 10px 30px rgba(0,0,0,.2);">' +
+            '<h2 style="margin:0 0 8px;font-size:20px;line-height:1.3;">' + config.title + '</h2>' +
+            '<p style="margin:0 0 12px;color:#50575e;">' + config.subtitle + '</p>' +
+            '<div id="dsbrsl-feedback-reasons" style="display:grid;gap:8px;margin-bottom:12px;"></div>' +
+            '<textarea id="dsbrsl-feedback-comment" rows="3" style="width:100%;margin:0 0 10px;" placeholder="' + config.placeholder + '"></textarea>' +
+            '<input id="dsbrsl-feedback-email" type="email" style="width:100%;margin:0 0 14px;" placeholder="' + config.emailPlaceholder + '" />' +
+            '<div style="display:flex;justify-content:flex-end;gap:8px;">' +
+            '<button type="button" class="button" id="dsbrsl-feedback-skip">' + config.skipLabel + '</button>' +
+            '<button type="button" class="button button-primary" id="dsbrsl-feedback-submit">' + config.submitLabel + '</button>' +
+            '</div>' +
+            '</div>';
+
+        document.body.appendChild(overlay);
+        var reasonsWrap = overlay.querySelector('#dsbrsl-feedback-reasons');
+        (config.reasons || []).forEach(function (item, index) {
+            var row = document.createElement('label');
+            row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;';
+            row.innerHTML = '<input type="radio" name="dsbrsl_feedback_reason" value="' + item.value + '" ' + (index === 0 ? 'checked' : '') + ' /><span>' + item.label + '</span>';
+            reasonsWrap.appendChild(row);
+        });
+
+        overlay.querySelector('#dsbrsl-feedback-skip').addEventListener('click', function () {
+            window.location.href = deactivateUrl;
+        });
+
+        overlay.querySelector('#dsbrsl-feedback-submit').addEventListener('click', function () {
+            var checked = overlay.querySelector('input[name="dsbrsl_feedback_reason"]:checked');
+            var comment = overlay.querySelector('#dsbrsl-feedback-comment').value || '';
+            var email = overlay.querySelector('#dsbrsl-feedback-email').value || '';
+            var body = new URLSearchParams();
+            body.set('action', config.action);
+            body.set('_ajax_nonce', config.nonce);
+            body.set('reason', checked ? checked.value : 'other');
+            body.set('comment', comment);
+            body.set('email', email);
+
+            fetch(config.ajaxUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+                body: body.toString(),
+                credentials: 'same-origin'
+            }).finally(function () {
+                window.location.href = deactivateUrl;
+            });
+        });
+
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay) {
+                overlay.remove();
+                overlay = null;
+            }
+        });
+
+        return overlay;
+    }
+
+    deactivateLink.addEventListener('click', function (event) {
+        event.preventDefault();
+        deactivateUrl = deactivateLink.getAttribute('href') || '';
+        buildModal();
+    });
+})();
+JS;
+
+                wp_add_inline_script($handle, $script, 'after');
+        }
+
+        public function ajax_deactivation_feedback(): void
+        {
+                check_ajax_referer(self::DEACTIVATE_FEEDBACK_AJAX);
+
+                if (! current_user_can('activate_plugins')) {
+                        wp_send_json_error(['message' => 'forbidden'], 403);
+                }
+
+                $reason = sanitize_key((string) filter_input(INPUT_POST, 'reason', FILTER_UNSAFE_RAW));
+                $allowedReasons = ['switched_to_pro', 'not_working', 'missing_feature', 'hard_to_use', 'switched_plugin', 'temporary', 'other'];
+                if (! in_array($reason, $allowedReasons, true)) {
+                        $reason = 'other';
+                }
+
+                $comment = trim((string) filter_input(INPUT_POST, 'comment', FILTER_UNSAFE_RAW));
+                $comment = sanitize_textarea_field($comment);
+                if (strlen($comment) > 600) {
+                        $comment = substr($comment, 0, 600);
+                }
+
+                $email = sanitize_email((string) filter_input(INPUT_POST, 'email', FILTER_UNSAFE_RAW));
+
+                $this->send_telemetry_event('deactivate_feedback', [
+                        'reason' => $reason,
+                        'comment' => $comment,
+                        'email' => $email,
+                ]);
+
+                wp_send_json_success(['ok' => true]);
+        }
+
+        private function send_telemetry_event(string $event, array $extra = []): void
+        {
+                self::send_telemetry_event_static($event, $extra);
+        }
+
+        private static function send_telemetry_event_static(string $event, array $extra = []): void
+        {
+                $host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+                $payload = array_merge([
+                        'event' => sanitize_key($event),
+                        'plugin' => 'lite',
+                        'version' => self::PLUGIN_VERSION,
+                        'install_id' => self::get_or_create_install_id(),
+                        'site_hash' => hash('sha256', strtolower(untrailingslashit(home_url('/')))),
+                        'home_host' => strtolower($host),
+                        'wp_version' => get_bloginfo('version'),
+                        'php_version' => PHP_VERSION,
+                        'locale' => get_locale(),
+                        'timestamp_utc' => gmdate('c'),
+                ], $extra);
+
+                wp_remote_post(self::TELEMETRY_ENDPOINT, [
+                        'timeout' => 5,
+                        'blocking' => false,
+                        'headers' => ['Content-Type' => 'application/json'],
+                        'body' => wp_json_encode($payload),
+                ]);
+        }
+
+        private static function get_or_create_install_id(): string
+        {
+                $installId = get_option(self::INSTALL_ID_OPTION, '');
+                if (is_string($installId) && preg_match('/^[a-zA-Z0-9\-]{8,64}$/', $installId) === 1) {
+                        return $installId;
+                }
+
+                $installId = wp_generate_uuid4();
+                update_option(self::INSTALL_ID_OPTION, $installId, false);
+
+                return $installId;
+        }
 
     public function register_frontend_assets(): void
     {

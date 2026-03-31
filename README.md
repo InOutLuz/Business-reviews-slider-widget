@@ -4,7 +4,7 @@ Tags: reviews, google reviews, trustpilot, slider
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.12
+Stable tag: 1.0.13
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -69,6 +69,12 @@ This plugin connects to third-party services to fetch review data and optional r
 - When data is sent: when WordPress performs plugin update checks (for example on updates screens / scheduled checks).
 - Data sent: basic WordPress update request data (site URL, plugin versions, WordPress/PHP versions, locale) as part of standard update-check requests.
 - Endpoint: https://products.dopestudio.co.uk/brs/downloads/dope-studio-business-reviews-slider-update.json
+
+4) Dope Studio telemetry endpoint (activation, heartbeat, deactivation feedback)
+- Purpose: estimates active installations and records optional deactivation reasons to improve the plugin.
+- When data is sent: on plugin activation, daily heartbeat, plugin deactivation, and when a user submits the deactivation feedback popup.
+- Data sent: generated install ID, hashed site URL (SHA-256), site host, plugin version, WordPress/PHP version, locale, and optional feedback reason/comment/email.
+- Endpoint: https://products.dopestudio.co.uk/brs/telemetry/collect.php
 
 ---
 
@@ -307,6 +313,11 @@ Current option keys:
 ---
 
 ## 11) Changelog (local)
+
+### 1.0.13
+- Added deactivation feedback popup on the plugins screen
+- Added telemetry pipeline updates for Pro active-install estimation and feedback collection
+- Added server-side telemetry file outputs for private cPanel-based review
 
 ### 1.0.12
 - Added built-in Pro plugin update checker using a remote metadata JSON endpoint

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider
  * Description: Fetch and display Google and Trustpilot reviews with a customizable slider widget.
- * Version: 1.0.12
+ * Version: 1.0.13
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * Update URI: https://products.dopestudio.co.uk/brs/
@@ -18,6 +18,7 @@ if (! defined('ABSPATH')) {
 class DSBRS_Business_Reviews_Slider_Widget
 {
     private const PLUGIN_SLUG = 'dope-studio-business-reviews-slider';
+    private const PLUGIN_VERSION = '1.0.13';
     private const UPDATE_METADATA_URL = 'https://products.dopestudio.co.uk/brs/downloads/dope-studio-business-reviews-slider-update.json';
     private const UPDATE_CACHE_TRANSIENT = 'dsbrs_update_metadata_cache';
     private const UPDATE_CACHE_TTL = 6 * HOUR_IN_SECONDS;
@@ -28,6 +29,10 @@ class DSBRS_Business_Reviews_Slider_Widget
     private const SHORTCODE_TRUSTPILOT = 'dsbrs_trustpilot_reviews_slider';
     private const AJAX_ACTION = 'dsbrs_fetch_reviews';
     private const CRON_HOOK = 'dsbrs_cron_fetch_reviews';
+    private const HEARTBEAT_HOOK = 'dsbrs_telemetry_heartbeat';
+    private const TELEMETRY_ENDPOINT = 'https://products.dopestudio.co.uk/brs/telemetry/collect.php';
+    private const INSTALL_ID_OPTION = 'dsbrs_install_id';
+    private const DEACTIVATE_FEEDBACK_AJAX = 'dsbrs_deactivation_feedback';
 
     public function __construct()
     {
@@ -40,7 +45,9 @@ class DSBRS_Business_Reviews_Slider_Widget
         add_action('wp_enqueue_scripts', [$this, 'register_frontend_assets']);
 
         add_action('wp_ajax_' . self::AJAX_ACTION, [$this, 'ajax_fetch_reviews']);
+        add_action('wp_ajax_' . self::DEACTIVATE_FEEDBACK_AJAX, [$this, 'ajax_deactivation_feedback']);
         add_action(self::CRON_HOOK, [$this, 'run_scheduled_fetch']);
+        add_action(self::HEARTBEAT_HOOK, [$this, 'send_heartbeat_ping']);
         add_action('admin_post_dsbrs_import_lite_data', [$this, 'handle_import_lite_data']);
         add_action('update_option_' . self::SETTINGS_OPTION, [$this, 'on_settings_updated'], 10, 2);
         add_filter('cron_schedules', [$this, 'register_cron_schedules']);
@@ -180,6 +187,17 @@ class DSBRS_Business_Reviews_Slider_Widget
     public static function deactivate(): void
     {
         wp_clear_scheduled_hook(self::CRON_HOOK);
+        wp_clear_scheduled_hook(self::HEARTBEAT_HOOK);
+        self::send_telemetry_event_static('deactivate');
+    }
+
+    public static function activate(): void
+    {
+        if (! wp_next_scheduled(self::HEARTBEAT_HOOK)) {
+            wp_schedule_event(time() + HOUR_IN_SECONDS, 'daily', self::HEARTBEAT_HOOK);
+        }
+
+        self::send_telemetry_event_static('activate');
     }
 
     public function register_admin_page(): void
@@ -438,6 +456,11 @@ class DSBRS_Business_Reviews_Slider_Widget
 
     public function enqueue_admin_assets(string $hook): void
     {
+        if ($hook === 'plugins.php') {
+            $this->enqueue_deactivation_feedback_assets();
+            return;
+        }
+
         if ($hook !== 'toplevel_page_dsbrs-dope-studio-business-reviews-slider') {
             return;
         }
@@ -463,6 +486,207 @@ class DSBRS_Business_Reviews_Slider_Widget
             'action'  => self::AJAX_ACTION,
         ]);
     }
+
+        private function enqueue_deactivation_feedback_assets(): void
+        {
+                if (! current_user_can('activate_plugins')) {
+                        return;
+                }
+
+                $handle = 'dsbrs-deactivation-feedback';
+                wp_register_script($handle, '', [], self::PLUGIN_VERSION, true);
+                wp_enqueue_script($handle);
+
+                $payload = [
+                        'ajaxUrl' => admin_url('admin-ajax.php'),
+                        'nonce' => wp_create_nonce(self::DEACTIVATE_FEEDBACK_AJAX),
+                        'action' => self::DEACTIVATE_FEEDBACK_AJAX,
+                        'pluginBasename' => plugin_basename(__FILE__),
+                        'title' => __('Quick feedback before you deactivate', 'dope-studio-business-reviews-slider'),
+                        'subtitle' => __('What made you deactivate the plugin?', 'dope-studio-business-reviews-slider'),
+                        'placeholder' => __('Optional: add a few details to help us improve', 'dope-studio-business-reviews-slider'),
+                        'emailPlaceholder' => __('Optional: your email if you want a reply', 'dope-studio-business-reviews-slider'),
+                        'skipLabel' => __('Skip and deactivate', 'dope-studio-business-reviews-slider'),
+                        'submitLabel' => __('Submit and deactivate', 'dope-studio-business-reviews-slider'),
+                        'reasons' => [
+                                ['value' => 'not_working', 'label' => __('The plugin is not working as expected', 'dope-studio-business-reviews-slider')],
+                                ['value' => 'missing_feature', 'label' => __('It is missing a feature I need', 'dope-studio-business-reviews-slider')],
+                                ['value' => 'hard_to_use', 'label' => __('It is hard to use or configure', 'dope-studio-business-reviews-slider')],
+                                ['value' => 'switched_plugin', 'label' => __('I switched to another plugin', 'dope-studio-business-reviews-slider')],
+                                ['value' => 'temporary', 'label' => __('Temporary deactivation', 'dope-studio-business-reviews-slider')],
+                                ['value' => 'other', 'label' => __('Other', 'dope-studio-business-reviews-slider')],
+                        ],
+                ];
+
+                wp_add_inline_script($handle, 'window.dsbrsDeactivateFeedback = ' . wp_json_encode($payload) . ';', 'before');
+
+                $script = <<<'JS'
+(function () {
+    var config = window.dsbrsDeactivateFeedback;
+    if (!config || !config.pluginBasename) {
+        return;
+    }
+
+    var deactivateLink = document.querySelector('tr[data-plugin="' + config.pluginBasename + '"] .deactivate a');
+    if (!deactivateLink) {
+        return;
+    }
+
+    var deactivateUrl = '';
+    var overlay = null;
+
+    function buildModal() {
+        if (overlay) {
+            return overlay;
+        }
+
+        overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:100000;';
+        overlay.innerHTML = '' +
+            '<div style="background:#fff;width:560px;max-width:calc(100vw - 32px);border-radius:8px;padding:20px 20px 16px;box-shadow:0 10px 30px rgba(0,0,0,.2);">' +
+            '<h2 style="margin:0 0 8px;font-size:20px;line-height:1.3;">' + config.title + '</h2>' +
+            '<p style="margin:0 0 12px;color:#50575e;">' + config.subtitle + '</p>' +
+            '<div id="dsbrs-feedback-reasons" style="display:grid;gap:8px;margin-bottom:12px;"></div>' +
+            '<textarea id="dsbrs-feedback-comment" rows="3" style="width:100%;margin:0 0 10px;" placeholder="' + config.placeholder + '"></textarea>' +
+            '<input id="dsbrs-feedback-email" type="email" style="width:100%;margin:0 0 14px;" placeholder="' + config.emailPlaceholder + '" />' +
+            '<div style="display:flex;justify-content:flex-end;gap:8px;">' +
+            '<button type="button" class="button" id="dsbrs-feedback-skip">' + config.skipLabel + '</button>' +
+            '<button type="button" class="button button-primary" id="dsbrs-feedback-submit">' + config.submitLabel + '</button>' +
+            '</div>' +
+            '</div>';
+
+        document.body.appendChild(overlay);
+        var reasonsWrap = overlay.querySelector('#dsbrs-feedback-reasons');
+        (config.reasons || []).forEach(function (item, index) {
+            var row = document.createElement('label');
+            row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;';
+            row.innerHTML = '<input type="radio" name="dsbrs_feedback_reason" value="' + item.value + '" ' + (index === 0 ? 'checked' : '') + ' /><span>' + item.label + '</span>';
+            reasonsWrap.appendChild(row);
+        });
+
+        overlay.querySelector('#dsbrs-feedback-skip').addEventListener('click', function () {
+            window.location.href = deactivateUrl;
+        });
+
+        overlay.querySelector('#dsbrs-feedback-submit').addEventListener('click', function () {
+            var checked = overlay.querySelector('input[name="dsbrs_feedback_reason"]:checked');
+            var comment = overlay.querySelector('#dsbrs-feedback-comment').value || '';
+            var email = overlay.querySelector('#dsbrs-feedback-email').value || '';
+            var body = new URLSearchParams();
+            body.set('action', config.action);
+            body.set('_ajax_nonce', config.nonce);
+            body.set('reason', checked ? checked.value : 'other');
+            body.set('comment', comment);
+            body.set('email', email);
+
+            fetch(config.ajaxUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+                body: body.toString(),
+                credentials: 'same-origin'
+            }).finally(function () {
+                window.location.href = deactivateUrl;
+            });
+        });
+
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay) {
+                overlay.remove();
+                overlay = null;
+            }
+        });
+
+        return overlay;
+    }
+
+    deactivateLink.addEventListener('click', function (event) {
+        event.preventDefault();
+        deactivateUrl = deactivateLink.getAttribute('href') || '';
+        buildModal();
+    });
+})();
+JS;
+
+                wp_add_inline_script($handle, $script, 'after');
+        }
+
+        public function ajax_deactivation_feedback(): void
+        {
+                check_ajax_referer(self::DEACTIVATE_FEEDBACK_AJAX);
+
+                if (! current_user_can('activate_plugins')) {
+                        wp_send_json_error(['message' => 'forbidden'], 403);
+                }
+
+                $reason = sanitize_key((string) filter_input(INPUT_POST, 'reason', FILTER_UNSAFE_RAW));
+                $allowedReasons = ['not_working', 'missing_feature', 'hard_to_use', 'switched_plugin', 'temporary', 'other'];
+                if (! in_array($reason, $allowedReasons, true)) {
+                        $reason = 'other';
+                }
+
+                $comment = trim((string) filter_input(INPUT_POST, 'comment', FILTER_UNSAFE_RAW));
+                $comment = sanitize_textarea_field($comment);
+                if (strlen($comment) > 600) {
+                        $comment = substr($comment, 0, 600);
+                }
+
+                $email = sanitize_email((string) filter_input(INPUT_POST, 'email', FILTER_UNSAFE_RAW));
+
+                $this->send_telemetry_event('deactivate_feedback', [
+                        'reason' => $reason,
+                        'comment' => $comment,
+                        'email' => $email,
+                ]);
+
+                wp_send_json_success(['ok' => true]);
+        }
+
+        public function send_heartbeat_ping(): void
+        {
+                $this->send_telemetry_event('heartbeat');
+        }
+
+        private function send_telemetry_event(string $event, array $extra = []): void
+        {
+                self::send_telemetry_event_static($event, $extra);
+        }
+
+        private static function send_telemetry_event_static(string $event, array $extra = []): void
+        {
+                $host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+                $payload = array_merge([
+                        'event' => sanitize_key($event),
+                        'plugin' => 'pro',
+                        'version' => self::PLUGIN_VERSION,
+                        'install_id' => self::get_or_create_install_id(),
+                        'site_hash' => hash('sha256', strtolower(untrailingslashit(home_url('/')))),
+                        'home_host' => strtolower($host),
+                        'wp_version' => get_bloginfo('version'),
+                        'php_version' => PHP_VERSION,
+                        'locale' => get_locale(),
+                        'timestamp_utc' => gmdate('c'),
+                ], $extra);
+
+                wp_remote_post(self::TELEMETRY_ENDPOINT, [
+                        'timeout' => 5,
+                        'blocking' => false,
+                        'headers' => ['Content-Type' => 'application/json'],
+                        'body' => wp_json_encode($payload),
+                ]);
+        }
+
+        private static function get_or_create_install_id(): string
+        {
+                $installId = get_option(self::INSTALL_ID_OPTION, '');
+                if (is_string($installId) && preg_match('/^[a-zA-Z0-9\-]{8,64}$/', $installId) === 1) {
+                        return $installId;
+                }
+
+                $installId = wp_generate_uuid4();
+                update_option(self::INSTALL_ID_OPTION, $installId, false);
+
+                return $installId;
+        }
 
     public function register_frontend_assets(): void
     {
@@ -2645,5 +2869,6 @@ class DSBRS_Business_Reviews_Slider_Widget
     }
 }
 
+register_activation_hook(__FILE__, ['DSBRS_Business_Reviews_Slider_Widget', 'activate']);
 register_deactivation_hook(__FILE__, ['DSBRS_Business_Reviews_Slider_Widget', 'deactivate']);
 new DSBRS_Business_Reviews_Slider_Widget();

@@ -4,7 +4,7 @@ Tags: reviews, google reviews, trustpilot, slider
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.13
+Stable tag: 1.0.14
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -106,6 +106,7 @@ This plugin connects to third-party services to fetch review data and optional r
 - Star rating source: Auto or Manual
 - Header review count source: Fetched or Custom
 - Platform-specific title controls
+- Configurable JSON-LD schema review limits (Google and Trustpilot)
 
 ### Trustpilot-Specific
 - Company domain fetch target
@@ -313,6 +314,11 @@ Current option keys:
 ---
 
 ## 11) Changelog (local)
+
+### 1.0.14
+- Added JSON-LD review schema output for Google and Trustpilot sliders
+- Added configurable schema review limit setting for Google slider
+- Added configurable schema review limit setting for Trustpilot slider
 
 ### 1.0.13
 - Added deactivation feedback popup on the plugins screen

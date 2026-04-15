@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider Lite
  * Description: Fetch and display Google reviews with a customizable slider widget.
- * Version: 1.0.13
+ * Version: 1.0.14
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * License: GPL-2.0+
@@ -16,7 +16,7 @@ if (! defined('ABSPATH')) {
 
 class DSBRSL_Google_Reviews_Slider_Lite
 {
-    private const PLUGIN_VERSION = '1.0.13';
+    private const PLUGIN_VERSION = '1.0.14';
     private const SETTINGS_OPTION = 'dsbrsl_settings';
     private const CACHE_OPTION = 'dsbrsl_reviews_cache';
     private const SHORTCODE_GOOGLE = 'dsbrsl_google_reviews_slider';
@@ -83,6 +83,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
                     'slides_tablet_default' => 2,
                     'slides_desktop_default' => 3,
                     'display_limit_default' => 0,
+                    'schema_review_limit_default' => 0,
                     'show_summary_default' => 1,
                     'show_read_on_google_default' => 1,
                     'rating_mode_default' => 'auto',
@@ -179,6 +180,13 @@ class DSBRSL_Google_Reviews_Slider_Lite
             $output['display_limit_default'] = 0;
         } else {
             $output['display_limit_default'] = max(6, min(500, absint($displayLimitRaw)));
+        }
+
+        $schemaLimitRaw = isset($input['schema_review_limit_default']) ? trim((string) $input['schema_review_limit_default']) : '';
+        if ($schemaLimitRaw === '') {
+            $output['schema_review_limit_default'] = 0;
+        } else {
+            $output['schema_review_limit_default'] = max(1, min(100, absint($schemaLimitRaw)));
         }
 
         $output['show_summary_default'] = $this->sanitize_checkbox_value($input, 'show_summary_default');
@@ -809,6 +817,13 @@ JS;
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_schema_review_limit_default"><?php esc_html_e('Schema reviews (JSON-LD)', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <td>
+                                        <input id="grs_schema_review_limit_default" type="number" min="1" max="100" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[schema_review_limit_default]" value="<?php echo esc_attr((string) ((int) ($settings['schema_review_limit_default'] ?? 0) <= 0 ? '' : (int) ($settings['schema_review_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty to match slider output', 'dope-studio-business-reviews-slider-lite'); ?>" />
+                                        <p class="description"><?php esc_html_e('Leave empty to use exactly the reviews shown by the slider after filters/limits. Set a number only if you want fewer schema reviews than displayed.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><label for="grs_min_rating_default"><?php esc_html_e('Default rating filter', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
                                     <td>
                                         <select id="grs_min_rating_default" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[min_rating_default]">
@@ -1248,6 +1263,99 @@ JS;
         return 'hash:' . md5($author . '|' . $date . '|' . $rating . '|' . $headline . '|' . $text);
     }
 
+    private function render_review_schema_script(array $reviews, float $ratingValue, int $reviewCount, string $headline = '', int $maxReviewItems = 0): string
+    {
+        if (empty($reviews)) {
+            return '';
+        }
+
+        $businessName = trim((string) get_bloginfo('name'));
+        if ($businessName === '') {
+            $businessName = 'Business';
+        }
+
+        $schema = [
+            '@context' => 'https://schema.org',
+            '@type' => 'Organization',
+            'name' => $businessName,
+            'url' => esc_url_raw(home_url('/')),
+            'aggregateRating' => [
+                '@type' => 'AggregateRating',
+                'ratingValue' => max(1, min(5, round($ratingValue, 1))),
+                'reviewCount' => max(1, $reviewCount),
+            ],
+        ];
+
+        if ($headline !== '') {
+            $schema['description'] = sanitize_text_field($headline);
+        }
+
+        $schemaReviews = [];
+        $schemaSourceReviews = $maxReviewItems > 0
+            ? array_slice($reviews, 0, max(1, min(100, $maxReviewItems)))
+            : $reviews;
+
+        foreach ($schemaSourceReviews as $review) {
+            if (! is_array($review)) {
+                continue;
+            }
+
+            $author = trim((string) ($review['author'] ?? 'Anonymous'));
+            $text = trim((string) ($review['text'] ?? ''));
+            $date = $this->schema_review_date((string) ($review['date'] ?? ''));
+            $rating = max(1, min(5, (float) ($review['rating'] ?? 0)));
+
+            if ($text === '') {
+                continue;
+            }
+
+            $item = [
+                '@type' => 'Review',
+                'author' => [
+                    '@type' => 'Person',
+                    'name' => $author !== '' ? $author : 'Anonymous',
+                ],
+                'reviewBody' => sanitize_textarea_field($text),
+                'reviewRating' => [
+                    '@type' => 'Rating',
+                    'ratingValue' => round($rating, 1),
+                    'bestRating' => 5,
+                ],
+                'publisher' => [
+                    '@type' => 'Organization',
+                    'name' => 'Google',
+                ],
+            ];
+
+            if ($date !== '') {
+                $item['datePublished'] = $date;
+            }
+
+            $schemaReviews[] = $item;
+        }
+
+        if (! empty($schemaReviews)) {
+            $schema['review'] = $schemaReviews;
+        }
+
+        return '<script type="application/ld+json">' . wp_json_encode($schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . '</script>';
+    }
+
+    private function schema_review_date(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+
+        $ts = strtotime($value);
+        if ($ts === false) {
+            return '';
+        }
+
+        return gmdate('Y-m-d', $ts);
+    }
+
     public function render_shortcode(array $atts = []): string
     {
         $settings = get_option(self::SETTINGS_OPTION, []);
@@ -1278,6 +1386,7 @@ JS;
         $defaultTablet = isset($settings['slides_tablet_default']) ? max(1, min(6, absint($settings['slides_tablet_default']))) : 2;
         $defaultDesktop = isset($settings['slides_desktop_default']) ? max(1, min(6, absint($settings['slides_desktop_default']))) : 3;
         $defaultDisplayLimit = isset($settings['display_limit_default']) ? max(0, min(500, absint($settings['display_limit_default']))) : 0;
+        $defaultSchemaReviewLimit = isset($settings['schema_review_limit_default']) ? max(0, min(100, absint($settings['schema_review_limit_default']))) : 0;
         $defaultShowSummary = isset($settings['show_summary_default']) ? (int) $settings['show_summary_default'] : 1;
         $defaultShowReadOnGoogle = isset($settings['show_read_on_google_default']) ? (int) $settings['show_read_on_google_default'] : 1;
         $defaultRatingMode = isset($settings['rating_mode_default']) ? (string) $settings['rating_mode_default'] : 'auto';
@@ -1359,6 +1468,14 @@ JS;
         if (empty($reviews) && ! empty($rawReviews)) {
             $reviews = $rawReviews;
         }
+
+        $schemaRating = $ratingMode === 'manual'
+            ? $manualRating
+            : (($usePlacesApiSummary && $placesRating > 0) ? $placesRating : (count($reviews) > 0 ? array_sum(array_map(static function (array $review): float {
+                return (float) ($review['rating'] ?? 0);
+            }, $reviews)) / count($reviews) : 0));
+        $schemaReviewCount = count($reviews);
+        $schemaScript = $this->render_review_schema_script($reviews, $schemaRating, $schemaReviewCount, (string) $atts['title'], $defaultSchemaReviewLimit);
 
         wp_enqueue_style('dsbrsl-frontend-style');
         wp_enqueue_script('dsbrsl-frontend-script');
@@ -1452,7 +1569,7 @@ JS;
         </section>
         <?php
 
-        return (string) ob_get_clean();
+        return (string) ob_get_clean() . $schemaScript;
     }
 
     private function star_html(float $rating): string

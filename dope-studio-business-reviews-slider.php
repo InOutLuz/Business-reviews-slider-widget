@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider
  * Description: Fetch and display Google and Trustpilot reviews with a customizable slider widget.
- * Version: 1.0.13
+ * Version: 1.0.14
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * Update URI: https://products.dopestudio.co.uk/brs/
@@ -18,7 +18,7 @@ if (! defined('ABSPATH')) {
 class DSBRS_Business_Reviews_Slider_Widget
 {
     private const PLUGIN_SLUG = 'dope-studio-business-reviews-slider';
-    private const PLUGIN_VERSION = '1.0.13';
+    private const PLUGIN_VERSION = '1.0.14';
     private const UPDATE_METADATA_URL = 'https://products.dopestudio.co.uk/brs/downloads/dope-studio-business-reviews-slider-update.json';
     private const UPDATE_CACHE_TRANSIENT = 'dsbrs_update_metadata_cache';
     private const UPDATE_CACHE_TTL = 6 * HOUR_IN_SECONDS;
@@ -245,6 +245,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                 'slides_tablet_default' => 2,
                 'slides_desktop_default' => 3,
                 'display_limit_default' => 0,
+                'schema_review_limit_default' => 0,
                 'show_summary_default' => 1,
                 'show_read_on_google_default' => 1,
                 'trustpilot_theme' => 'dark',
@@ -258,6 +259,7 @@ class DSBRS_Business_Reviews_Slider_Widget
                 'trustpilot_slides_tablet_default' => 2,
                 'trustpilot_slides_desktop_default' => 3,
                 'trustpilot_display_limit_default' => 0,
+                'trustpilot_schema_review_limit_default' => 0,
                 'trustpilot_show_summary_default' => 1,
                 'trustpilot_show_titles_default' => 1,
                 'trustpilot_show_no_comment_default' => 0,
@@ -396,6 +398,20 @@ class DSBRS_Business_Reviews_Slider_Widget
             $output['trustpilot_display_limit_default'] = 0;
         } else {
             $output['trustpilot_display_limit_default'] = max(6, min(500, absint($tpDisplayLimitRaw)));
+        }
+
+        $schemaLimitRaw = isset($input['schema_review_limit_default']) ? trim((string) $input['schema_review_limit_default']) : '';
+        if ($schemaLimitRaw === '') {
+            $output['schema_review_limit_default'] = 0;
+        } else {
+            $output['schema_review_limit_default'] = max(1, min(100, absint($schemaLimitRaw)));
+        }
+
+        $tpSchemaLimitRaw = isset($input['trustpilot_schema_review_limit_default']) ? trim((string) $input['trustpilot_schema_review_limit_default']) : '';
+        if ($tpSchemaLimitRaw === '') {
+            $output['trustpilot_schema_review_limit_default'] = 0;
+        } else {
+            $output['trustpilot_schema_review_limit_default'] = max(1, min(100, absint($tpSchemaLimitRaw)));
         }
 
         $tpMinRating = isset($input['trustpilot_min_rating_default']) ? absint($input['trustpilot_min_rating_default']) : 0;
@@ -1083,6 +1099,13 @@ JS;
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_schema_review_limit_default"><?php esc_html_e('Schema reviews (JSON-LD)', 'dope-studio-business-reviews-slider'); ?></label></th>
+                                    <td>
+                                        <input id="grs_schema_review_limit_default" type="number" min="1" max="100" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[schema_review_limit_default]" value="<?php echo esc_attr((string) ((int) ($settings['schema_review_limit_default'] ?? 0) <= 0 ? '' : (int) ($settings['schema_review_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty to match slider output', 'dope-studio-business-reviews-slider'); ?>" />
+                                        <p class="description"><?php esc_html_e('Leave empty to use exactly the reviews shown by the slider after filters/limits. Set a number only if you want fewer schema reviews than displayed.', 'dope-studio-business-reviews-slider'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><label for="grs_min_rating_default"><?php esc_html_e('Default rating filter', 'dope-studio-business-reviews-slider'); ?></label></th>
                                     <td>
                                         <select id="grs_min_rating_default" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[min_rating_default]">
@@ -1196,6 +1219,13 @@ JS;
                                     <td>
                                         <input id="grs_trustpilot_display_limit_default" type="number" min="6" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_display_limit_default]" value="<?php echo esc_attr((string) ((int) ($settings['trustpilot_display_limit_default'] ?? 0) <= 0 ? '' : (int) ($settings['trustpilot_display_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider'); ?>" />
                                         <p class="description"><?php esc_html_e('Frontend only: limit shown reviews. Leave empty to show all fetched reviews. Minimum when set: 6. Applied after filters (no-comment/rating).', 'dope-studio-business-reviews-slider'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_trustpilot_schema_review_limit_default"><?php esc_html_e('Schema reviews (JSON-LD)', 'dope-studio-business-reviews-slider'); ?></label></th>
+                                    <td>
+                                        <input id="grs_trustpilot_schema_review_limit_default" type="number" min="1" max="100" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[trustpilot_schema_review_limit_default]" value="<?php echo esc_attr((string) ((int) ($settings['trustpilot_schema_review_limit_default'] ?? 0) <= 0 ? '' : (int) ($settings['trustpilot_schema_review_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty to match slider output', 'dope-studio-business-reviews-slider'); ?>" />
+                                        <p class="description"><?php esc_html_e('Leave empty to use exactly the reviews shown by the slider after filters/limits. Set a number only if you want fewer schema reviews than displayed.', 'dope-studio-business-reviews-slider'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleTrustpilot !== '' ? ' style="' . esc_attr($rowStyleTrustpilot) . '"' : ''; ?>>
@@ -1416,6 +1446,7 @@ JS;
             'slides_tablet_default',
             'slides_desktop_default',
             'display_limit_default',
+            'schema_review_limit_default',
             'show_summary_default',
             'show_read_on_google_default',
             'rating_mode_default',
@@ -2030,6 +2061,105 @@ JS;
         return '';
     }
 
+    private function render_review_schema_script(array $reviews, float $ratingValue, int $reviewCount, string $platform, string $headline = '', int $maxReviewItems = 0): string
+    {
+        if (empty($reviews)) {
+            return '';
+        }
+
+        $businessName = trim((string) get_bloginfo('name'));
+        if ($businessName === '') {
+            $businessName = 'Business';
+        }
+
+        $schema = [
+            '@context' => 'https://schema.org',
+            '@type' => 'Organization',
+            'name' => $businessName,
+            'url' => esc_url_raw(home_url('/')),
+            'aggregateRating' => [
+                '@type' => 'AggregateRating',
+                'ratingValue' => max(1, min(5, round($ratingValue, 1))),
+                'reviewCount' => max(1, $reviewCount),
+            ],
+        ];
+
+        if ($headline !== '') {
+            $schema['description'] = sanitize_text_field($headline);
+        }
+
+        $schemaReviews = [];
+        $schemaSourceReviews = $maxReviewItems > 0
+            ? array_slice($reviews, 0, max(1, min(100, $maxReviewItems)))
+            : $reviews;
+
+        foreach ($schemaSourceReviews as $review) {
+            if (! is_array($review)) {
+                continue;
+            }
+
+            $author = trim((string) ($review['author'] ?? 'Anonymous'));
+            $text = trim((string) ($review['text'] ?? ''));
+            $title = trim((string) ($review['headline'] ?? ''));
+            $date = $this->schema_review_date((string) ($review['date'] ?? ''));
+            $rating = max(1, min(5, (float) ($review['rating'] ?? 0)));
+
+            if ($text === '' && $title === '') {
+                continue;
+            }
+
+            $item = [
+                '@type' => 'Review',
+                'author' => [
+                    '@type' => 'Person',
+                    'name' => $author !== '' ? $author : 'Anonymous',
+                ],
+                'reviewRating' => [
+                    '@type' => 'Rating',
+                    'ratingValue' => round($rating, 1),
+                    'bestRating' => 5,
+                ],
+                'publisher' => [
+                    '@type' => 'Organization',
+                    'name' => $platform,
+                ],
+            ];
+
+            if ($date !== '') {
+                $item['datePublished'] = $date;
+            }
+            if ($title !== '') {
+                $item['name'] = sanitize_text_field($title);
+            }
+            if ($text !== '') {
+                $item['reviewBody'] = sanitize_textarea_field($text);
+            }
+
+            $schemaReviews[] = $item;
+        }
+
+        if (! empty($schemaReviews)) {
+            $schema['review'] = $schemaReviews;
+        }
+
+        return '<script type="application/ld+json">' . wp_json_encode($schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . '</script>';
+    }
+
+    private function schema_review_date(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+
+        $ts = strtotime($value);
+        if ($ts === false) {
+            return '';
+        }
+
+        return gmdate('Y-m-d', $ts);
+    }
+
     public function render_shortcode(array $atts = []): string
     {
         $settings = get_option(self::SETTINGS_OPTION, []);
@@ -2058,6 +2188,7 @@ JS;
         $defaultTablet = isset($settings['slides_tablet_default']) ? max(1, min(6, absint($settings['slides_tablet_default']))) : 2;
         $defaultDesktop = isset($settings['slides_desktop_default']) ? max(1, min(6, absint($settings['slides_desktop_default']))) : 3;
         $defaultDisplayLimit = isset($settings['display_limit_default']) ? max(0, min(500, absint($settings['display_limit_default']))) : 0;
+        $defaultSchemaReviewLimit = isset($settings['schema_review_limit_default']) ? max(0, min(100, absint($settings['schema_review_limit_default']))) : 0;
         $defaultShowSummary = isset($settings['show_summary_default']) ? (int) $settings['show_summary_default'] : 1;
         $defaultShowReadOnGoogle = isset($settings['show_read_on_google_default']) ? (int) $settings['show_read_on_google_default'] : 1;
         $defaultRatingMode = isset($settings['rating_mode_default']) ? (string) $settings['rating_mode_default'] : 'auto';
@@ -2138,6 +2269,14 @@ JS;
         if (empty($reviews) && ! empty($rawReviews)) {
             $reviews = $rawReviews;
         }
+
+        $schemaRating = $ratingMode === 'manual'
+            ? $manualRating
+            : (($usePlacesApiSummary && $placesRating > 0) ? $placesRating : (count($reviews) > 0 ? array_sum(array_map(static function (array $review): float {
+                return (float) ($review['rating'] ?? 0);
+            }, $reviews)) / count($reviews) : 0));
+        $schemaReviewCount = count($reviews);
+        $schemaScript = $this->render_review_schema_script($reviews, $schemaRating, $schemaReviewCount, 'Google', (string) $atts['title'], $defaultSchemaReviewLimit);
 
         wp_enqueue_style('dsbrs-frontend-style');
         wp_enqueue_script('dsbrs-frontend-script');
@@ -2240,7 +2379,7 @@ JS;
         </section>
         <?php
 
-        return ob_get_clean();
+        return (string) ob_get_clean() . $schemaScript;
     }
 
     public function render_trustpilot_shortcode(array $atts = []): string
@@ -2265,6 +2404,7 @@ JS;
         $defaultTablet = isset($settings['trustpilot_slides_tablet_default']) ? max(1, min(6, absint($settings['trustpilot_slides_tablet_default']))) : 2;
         $defaultDesktop = isset($settings['trustpilot_slides_desktop_default']) ? max(1, min(6, absint($settings['trustpilot_slides_desktop_default']))) : 3;
         $defaultDisplayLimit = isset($settings['trustpilot_display_limit_default']) ? max(0, min(500, absint($settings['trustpilot_display_limit_default']))) : 0;
+        $defaultSchemaReviewLimit = isset($settings['trustpilot_schema_review_limit_default']) ? max(0, min(100, absint($settings['trustpilot_schema_review_limit_default']))) : 0;
         $defaultShowSummary = isset($settings['trustpilot_show_summary_default']) ? (int) $settings['trustpilot_show_summary_default'] : 1;
         $defaultShowTitles = isset($settings['trustpilot_show_titles_default']) ? (int) $settings['trustpilot_show_titles_default'] : 1;
         $defaultMinRating = isset($settings['trustpilot_min_rating_default']) ? absint($settings['trustpilot_min_rating_default']) : 0;
@@ -2347,6 +2487,12 @@ JS;
         if ($limit > 0) {
             $reviews = array_slice($reviews, 0, min(100, $limit));
         }
+
+        $schemaRating = $ratingMode === 'manual'
+            ? $manualRating
+            : $this->trustpilot_bayesian_score($reviews);
+        $schemaReviewCount = count($reviews);
+        $schemaScript = $this->render_review_schema_script($reviews, $schemaRating, $schemaReviewCount, 'Trustpilot', (string) $atts['title'], $defaultSchemaReviewLimit);
 
         wp_enqueue_style('dsbrs-frontend-style');
         wp_enqueue_script('dsbrs-frontend-script');
@@ -2452,7 +2598,7 @@ JS;
         </section>
         <?php
 
-        return ob_get_clean();
+        return (string) ob_get_clean() . $schemaScript;
     }
 
     private function star_html(float $rating): string

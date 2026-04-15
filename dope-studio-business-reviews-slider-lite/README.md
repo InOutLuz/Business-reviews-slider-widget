@@ -4,7 +4,7 @@ Tags: reviews, google reviews, slider, widget, google
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.13
+Stable tag: 1.0.14
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -61,6 +61,7 @@ Getting Google reviews onto your site has always meant either paying for an expe
 - Filter out reviews below a minimum star rating
 - Hide reviews with no written comment
 - Set a frontend display limit independently from your fetch limit
+- Configure how many reviews are included in JSON-LD schema markup
 - Show reviews newest-first
 - Optionally show or hide "Read on Google" links
 
@@ -269,6 +270,10 @@ In your own WordPress database. The plugin caches fetched reviews locally so the
 ---
 
 == Changelog ==
+
+= 1.0.14 =
+* Added JSON-LD review schema output for Google slider.
+* Added configurable schema review limit setting for slider rich-result markup.
 
 = 1.0.13 =
 * Added deactivation feedback popup on the plugins screen.

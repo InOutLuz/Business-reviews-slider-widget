@@ -4,15 +4,17 @@ Tags: reviews, google reviews, slider, widget, google
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.14
+Stable tag: 1.0.16
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
 Display unlimited Google reviews in a beautiful slider — completely free. No API billing surprises, no review caps.
 
+Now with a friendly step-by-step setup wizard that helps beginners get started quickly, with the option to skip straight to the classic settings if preferred.
+
 == Description ==
 
-**Show unlimited Google reviews on your site for free.** Dope Studio Business Reviews Slider Lite fetches and displays your Google reviews in a polished, responsive slider — with no limits on how many reviews you can show.
+**Show unlimited Google reviews on your site for free.** Dope Studio Business Reviews Slider Lite fetches and displays your Google reviews in a polished, responsive slider (JSON-LD schema ready) — with no limits on how many reviews you can show.
 
 **Fresh reviews every day (recommended setup):**
 1. Run your first fetch with **Max reviews** left empty to import your full review history.
@@ -270,6 +272,14 @@ In your own WordPress database. The plugin caches fetched reviews locally so the
 ---
 
 == Changelog ==
+
+= 1.0.16 =
+* Added a Skip wizard option for fresh installs.
+* Fixed empty schema review limit so it stays empty unless the user explicitly sets a value.
+* Improved upgrade handling so older installs open the classic settings page instead of being forced back into the wizard.
+
+= 1.0.15 =
+* Added a guided setup wizard for Lite onboarding.
 
 = 1.0.14 =
 * Added JSON-LD review schema output for Google slider.

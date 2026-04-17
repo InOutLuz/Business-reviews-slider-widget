@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider Lite
  * Description: Fetch and display Google reviews with a customizable slider widget.
- * Version: 1.0.14
+ * Version: 1.0.16
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * License: GPL-2.0+
@@ -16,7 +16,7 @@ if (! defined('ABSPATH')) {
 
 class DSBRSL_Google_Reviews_Slider_Lite
 {
-    private const PLUGIN_VERSION = '1.0.14';
+    private const PLUGIN_VERSION = '1.0.16';
     private const SETTINGS_OPTION = 'dsbrsl_settings';
     private const CACHE_OPTION = 'dsbrsl_reviews_cache';
     private const SHORTCODE_GOOGLE = 'dsbrsl_google_reviews_slider';
@@ -29,6 +29,7 @@ class DSBRSL_Google_Reviews_Slider_Lite
     public function __construct()
     {
         add_action('admin_init', [$this, 'maybe_repair_legacy_defaults'], 5);
+        add_action('admin_init', [$this, 'handle_run_wizard_request'], 6);
         add_action('admin_menu', [$this, 'register_admin_page']);
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
@@ -76,14 +77,16 @@ class DSBRSL_Google_Reviews_Slider_Lite
                     'theme' => 'dark',
                     'autoplay_default' => 1,
                     'autoplay_interval_default' => 5500,
-                    'loop_infinite_default' => 0,
+                    'loop_infinite_default' => 1,
                     'show_dots_default' => 1,
                     'swipe_default' => 1,
                     'slides_mobile_default' => 1,
                     'slides_tablet_default' => 2,
                     'slides_desktop_default' => 3,
                     'display_limit_default' => 0,
+                    'display_limit_default_touched' => 0,
                     'schema_review_limit_default' => 0,
+                    'schema_review_limit_default_touched' => 0,
                     'show_summary_default' => 1,
                     'show_read_on_google_default' => 1,
                     'rating_mode_default' => 'auto',
@@ -96,7 +99,9 @@ class DSBRSL_Google_Reviews_Slider_Lite
                     'cron_enabled' => 0,
                     'cron_frequency' => 'weekly',
                     'cron_time' => '03:00',
+                    'cron_max_reviews' => 1,
                     'cron_fetch_scope' => 'enabled',
+                    'wizard_completed' => 0,
                     'delete_on_uninstall' => 0,
                 ],
             ]
@@ -105,17 +110,50 @@ class DSBRSL_Google_Reviews_Slider_Lite
 
     public function maybe_repair_legacy_defaults(): void
     {
+        $settings = get_option(self::SETTINGS_OPTION, null);
+        if (is_array($settings)) {
+            $displayLimitTouched = isset($settings['display_limit_default_touched']) ? (int) $settings['display_limit_default_touched'] : 0;
+            if (! isset($settings['display_limit_default_touched'])) {
+                $settings['display_limit_default_touched'] = 0;
+            }
+
+            $schemaLimitTouched = isset($settings['schema_review_limit_default_touched']) ? (int) $settings['schema_review_limit_default_touched'] : 0;
+            if (! isset($settings['schema_review_limit_default_touched'])) {
+                $settings['schema_review_limit_default_touched'] = 0;
+            }
+
+            if (isset($settings['display_limit_default']) && (int) $settings['display_limit_default'] === 6 && $displayLimitTouched !== 1) {
+                $settings['display_limit_default'] = 0;
+                $settings['display_limit_default_touched'] = 0;
+            }
+
+            if (isset($settings['schema_review_limit_default']) && (int) $settings['schema_review_limit_default'] === 10 && $schemaLimitTouched !== 1) {
+                $settings['schema_review_limit_default'] = 0;
+                $settings['schema_review_limit_default_touched'] = 0;
+            }
+
+            if (! isset($settings['wizard_completed'])) {
+                $settings['wizard_completed'] = 1;
+            }
+
+            update_option(self::SETTINGS_OPTION, $settings);
+        }
+
         if (get_option('dsbrsl_legacy_defaults_fixed_103', '0') === '1') {
             return;
         }
 
-        $settings = get_option(self::SETTINGS_OPTION, null);
         if (! is_array($settings)) {
             update_option('dsbrsl_legacy_defaults_fixed_103', '1', false);
             return;
         }
 
         $changed = false;
+
+        if (! isset($settings['wizard_completed'])) {
+            $settings['wizard_completed'] = 1;
+            $changed = true;
+        }
 
         foreach (['use_places_api_summary', 'cron_enabled', 'delete_on_uninstall'] as $checkboxKey) {
             if (isset($settings[$checkboxKey]) && (int) $settings[$checkboxKey] === 1) {
@@ -129,8 +167,15 @@ class DSBRSL_Google_Reviews_Slider_Lite
             $changed = true;
         }
 
-        if (isset($settings['display_limit_default']) && (int) $settings['display_limit_default'] === 6) {
+        if (isset($settings['display_limit_default']) && (int) $settings['display_limit_default'] === 6 && (! isset($settings['display_limit_default_touched']) || (int) $settings['display_limit_default_touched'] !== 1)) {
             $settings['display_limit_default'] = 0;
+            $settings['display_limit_default_touched'] = 0;
+            $changed = true;
+        }
+
+        if (isset($settings['schema_review_limit_default']) && (int) $settings['schema_review_limit_default'] === 10 && (! isset($settings['schema_review_limit_default_touched']) || (int) $settings['schema_review_limit_default_touched'] !== 1)) {
+            $settings['schema_review_limit_default'] = 0;
+            $settings['schema_review_limit_default_touched'] = 0;
             $changed = true;
         }
 
@@ -139,6 +184,44 @@ class DSBRSL_Google_Reviews_Slider_Lite
         }
 
         update_option('dsbrsl_legacy_defaults_fixed_103', '1', false);
+    }
+
+    public function handle_run_wizard_request(): void
+    {
+        if (! is_admin() || ! current_user_can('manage_options')) {
+            return;
+        }
+
+        $page = sanitize_key((string) filter_input(INPUT_GET, 'page', FILTER_UNSAFE_RAW));
+        if ($page !== 'dsbrsl-dope-studio-business-reviews-slider-lite') {
+            return;
+        }
+
+        $runWizard = sanitize_key((string) filter_input(INPUT_GET, 'run_wizard', FILTER_UNSAFE_RAW));
+        $skipWizard = sanitize_key((string) filter_input(INPUT_GET, 'skip_wizard', FILTER_UNSAFE_RAW));
+        $wizardNonce = sanitize_text_field((string) filter_input(INPUT_GET, '_wpnonce', FILTER_UNSAFE_RAW));
+        if ($runWizard !== '1' && $skipWizard !== '1') {
+            return;
+        }
+
+        $expectedAction = $runWizard === '1' ? 'dsbrsl_run_wizard' : 'dsbrsl_skip_wizard';
+        if (! wp_verify_nonce($wizardNonce, $expectedAction)) {
+            return;
+        }
+
+        $settings = get_option(self::SETTINGS_OPTION, []);
+        if (! is_array($settings)) {
+            $settings = [];
+        }
+
+        $settings['wizard_completed'] = $runWizard === '1' ? 0 : 1;
+        update_option(self::SETTINGS_OPTION, $settings, false);
+
+        wp_safe_redirect(add_query_arg(array_filter([
+            'page' => 'dsbrsl-dope-studio-business-reviews-slider-lite',
+            'wizard_reset' => $runWizard === '1' ? '1' : null,
+        ]), admin_url('admin.php')));
+        exit;
     }
 
     public function sanitize_settings(array $input): array
@@ -176,17 +259,21 @@ class DSBRSL_Google_Reviews_Slider_Lite
         $output['slides_desktop_default'] = isset($input['slides_desktop_default']) ? max(1, min(6, absint($input['slides_desktop_default']))) : 3;
 
         $displayLimitRaw = isset($input['display_limit_default']) ? trim((string) $input['display_limit_default']) : '';
-        if ($displayLimitRaw === '') {
+        if ($displayLimitRaw === '' || absint($displayLimitRaw) <= 0) {
             $output['display_limit_default'] = 0;
+            $output['display_limit_default_touched'] = 0;
         } else {
             $output['display_limit_default'] = max(6, min(500, absint($displayLimitRaw)));
+            $output['display_limit_default_touched'] = 1;
         }
 
         $schemaLimitRaw = isset($input['schema_review_limit_default']) ? trim((string) $input['schema_review_limit_default']) : '';
-        if ($schemaLimitRaw === '') {
+        if ($schemaLimitRaw === '' || absint($schemaLimitRaw) <= 0) {
             $output['schema_review_limit_default'] = 0;
+            $output['schema_review_limit_default_touched'] = 0;
         } else {
             $output['schema_review_limit_default'] = max(1, min(100, absint($schemaLimitRaw)));
+            $output['schema_review_limit_default_touched'] = 1;
         }
 
         $output['show_summary_default'] = $this->sanitize_checkbox_value($input, 'show_summary_default');
@@ -219,8 +306,17 @@ class DSBRSL_Google_Reviews_Slider_Lite
         }
         $output['cron_time'] = $cronTime;
 
+        $cronMaxReviewsRaw = isset($input['cron_max_reviews']) ? trim((string) $input['cron_max_reviews']) : '';
+        if ($cronMaxReviewsRaw === '') {
+            $output['cron_max_reviews'] = 1;
+        } else {
+            $output['cron_max_reviews'] = max(1, min(50, absint($cronMaxReviewsRaw)));
+        }
+
         // Lite is Google-only, so cron fetch scope is fixed.
         $output['cron_fetch_scope'] = 'enabled';
+
+        $output['wizard_completed'] = $this->sanitize_checkbox_value($input, 'wizard_completed');
 
         $output['delete_on_uninstall'] = $this->sanitize_checkbox_value($input, 'delete_on_uninstall');
 
@@ -252,18 +348,21 @@ class DSBRSL_Google_Reviews_Slider_Lite
             return;
         }
 
+        $adminCssPath = plugin_dir_path(__FILE__) . 'assets/admin.css';
+        $adminJsPath = plugin_dir_path(__FILE__) . 'assets/admin.js';
+
         wp_enqueue_style(
             'dsbrsl-admin-style',
             plugin_dir_url(__FILE__) . 'assets/admin.css',
             [],
-            '1.0.0'
+            file_exists($adminCssPath) ? (string) filemtime($adminCssPath) : self::PLUGIN_VERSION
         );
 
         wp_enqueue_script(
             'dsbrsl-admin-script',
             plugin_dir_url(__FILE__) . 'assets/admin.js',
             [],
-            '1.0.0',
+            file_exists($adminJsPath) ? (string) filemtime($adminJsPath) : self::PLUGIN_VERSION,
             true
         );
 
@@ -501,6 +600,12 @@ JS;
         $count = $googleCount;
         $updated = isset($cache['updated_at']) ? (int) $cache['updated_at'] : 0;
         $nextCronTs = wp_next_scheduled(self::CRON_HOOK);
+        $settingsUpdated = filter_input(INPUT_GET, 'settings-updated', FILTER_UNSAFE_RAW);
+        $isSettingsUpdated = is_string($settingsUpdated) && $settingsUpdated === 'true';
+        $wizardCompleted = isset($settings['wizard_completed']) && (int) $settings['wizard_completed'] === 1;
+
+        $wizardReset = sanitize_key((string) filter_input(INPUT_GET, 'wizard_reset', FILTER_UNSAFE_RAW)) === '1';
+
         $activeTabNonce = sanitize_text_field((string) filter_input(INPUT_GET, '_wpnonce', FILTER_UNSAFE_RAW));
         $activeTab = sanitize_key((string) filter_input(INPUT_GET, 'tab', FILTER_UNSAFE_RAW));
         if ($activeTab === '') {
@@ -522,25 +627,337 @@ JS;
             'page' => 'dsbrsl-dope-studio-business-reviews-slider-lite',
             'tab'  => 'google',
         ], admin_url('admin.php')), 'dsbrsl_admin_tab');
+        $runWizardUrl = wp_nonce_url(add_query_arg([
+            'page' => 'dsbrsl-dope-studio-business-reviews-slider-lite',
+            'run_wizard' => '1',
+        ], admin_url('admin.php')), 'dsbrsl_run_wizard');
+        $skipWizardUrl = wp_nonce_url(add_query_arg([
+            'page' => 'dsbrsl-dope-studio-business-reviews-slider-lite',
+            'skip_wizard' => '1',
+        ], admin_url('admin.php')), 'dsbrsl_skip_wizard');
         ?>
-        <div class="wrap grs-wrap">
+        <div class="wrap grs-wrap" data-settings-updated="<?php echo $isSettingsUpdated ? '1' : '0'; ?>" data-wizard-reset="<?php echo $wizardReset ? '1' : '0'; ?>">
             <h1><?php esc_html_e('Dope Studio Business Reviews Slider Lite', 'dope-studio-business-reviews-slider-lite'); ?></h1>
-            <p><?php esc_html_e('Fetch reviews, and use shortcode on the frontend.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+            <p><?php esc_html_e('Let’s set everything up in a few simple steps. Friendly, fast, and beginner-safe.', 'dope-studio-business-reviews-slider-lite'); ?></p>
 
             <div class="grs-cards">
                 <div class="grs-card">
+                    <?php if (! $wizardCompleted) : ?>
+                    <div class="grs-wizard-header">
+                        <div class="grs-wizard-kicker"><?php esc_html_e('Setup wizard', 'dope-studio-business-reviews-slider-lite'); ?></div>
+                        <h2><?php esc_html_e('Business Reviews Lite onboarding', 'dope-studio-business-reviews-slider-lite'); ?></h2>
+                        <p class="description"><?php esc_html_e('Answer each question and we will configure everything for you.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                        <p><a class="button button-secondary" href="<?php echo esc_url($skipWizardUrl); ?>"><?php esc_html_e('Skip wizard', 'dope-studio-business-reviews-slider-lite'); ?></a></p>
+                        <div class="grs-wizard-progress">
+                            <div class="grs-wizard-progress-bar" id="grs-wizard-progress-bar"></div>
+                        </div>
+                        <p class="grs-wizard-progress-text" id="grs-wizard-progress-text"></p>
+                    </div>
+
+                    <form method="post" action="options.php" id="grs-settings-form">
+                        <?php settings_fields('dsbrsl_settings_group'); ?>
+                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[enable_google]" value="1" />
+                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_fetch_scope]" value="enabled" />
+                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[wizard_completed]" value="1" />
+
+                        <section class="grs-wizard-step" data-step="1">
+                            <h3><?php esc_html_e('Step 1: Connect your Apify account', 'dope-studio-business-reviews-slider-lite'); ?></h3>
+                            <p class="description"><?php esc_html_e('Do you already have an Apify token? Paste it below to unlock fetching.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            <div class="grs-field">
+                                <label for="grs_token"><?php esc_html_e('Apify account token', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                <input id="grs_token" type="password" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[token]" class="regular-text" value="<?php echo esc_attr($settings['token'] ?? ''); ?>" placeholder="apify_api_..." required />
+                                <p class="description"><?php esc_html_e('Apify has a generous free tier enough for most websites. Register now no credit card required.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                                <p class="description">
+                                    <a class="button" href="<?php echo esc_url('https://console.apify.com/sign-up'); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Create Apify account', 'dope-studio-business-reviews-slider-lite'); ?></a>
+                                    &nbsp;
+                                    <a class="button" href="<?php echo esc_url('https://console.apify.com/settings/integrations'); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Get token', 'dope-studio-business-reviews-slider-lite'); ?></a>
+                                </p>
+                                <p class="grs-status" id="grs-step1-status"></p>
+                            </div>
+                        </section>
+
+                        <section class="grs-wizard-step" data-step="2">
+                            <h3><?php esc_html_e('Step 2: Choose your Google place and fetch reviews', 'dope-studio-business-reviews-slider-lite'); ?></h3>
+                            <p class="description"><?php esc_html_e('What Google Maps URL should we use? Open Google Maps, search for your company, click on your business profile, and copy the URL from your browser.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            <p class="description"><a class="button" href="<?php echo esc_url('https://maps.google.com'); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Open Google Maps', 'dope-studio-business-reviews-slider-lite'); ?></a></p>
+
+                            <div class="grs-field">
+                                <label for="grs_place_url"><?php esc_html_e('Google Maps URL', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                <input id="grs_place_url" type="url" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[place_url]" class="regular-text" value="<?php echo esc_attr($settings['place_url'] ?? ''); ?>" placeholder="https://www.google.com/maps/place/..." required />
+                                <p class="description"><?php esc_html_e('Paste the share URL from Google Maps for your business.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field">
+                                <label for="grs_max_reviews"><?php esc_html_e('How many reviews should we fetch?', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                <input id="grs_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[max_reviews]" value="<?php echo esc_attr((string) ((int) ($settings['max_reviews'] ?? 0) <= 0 ? '' : (int) ($settings['max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider-lite'); ?>" />
+                                <p class="description"><?php esc_html_e('For first setup, fetching all reviews is recommended. Later, for cron, use 1-5.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field">
+                                <label for="grs_language"><?php esc_html_e('Language', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                <input id="grs_language" type="text" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[language]" value="<?php echo esc_attr($settings['language'] ?? 'en'); ?>" class="small-text" />
+                            </div>
+
+                            <details class="grs-advanced-toggle">
+                                <summary><?php esc_html_e('Optional advanced source settings', 'dope-studio-business-reviews-slider-lite'); ?></summary>
+                                <div class="grs-field">
+                                    <label for="grs_place_id"><?php esc_html_e('Place ID (optional fallback)', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                    <input id="grs_place_id" type="text" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[place_id]" class="regular-text" value="<?php echo esc_attr($settings['place_id'] ?? ''); ?>" placeholder="ChIJ..." />
+                                </div>
+                                <div class="grs-field">
+                                    <label for="grs_google_places_api_key"><?php esc_html_e('Google Places API key (optional)', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                    <input id="grs_google_places_api_key" type="password" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[google_places_api_key]" class="regular-text" value="<?php echo esc_attr($settings['google_places_api_key'] ?? ''); ?>" placeholder="AIza..." />
+                                </div>
+                                <div class="grs-field">
+                                    <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[use_places_api_summary]" value="0" />
+                                    <label for="grs_use_places_api_summary">
+                                        <input id="grs_use_places_api_summary" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[use_places_api_summary]" value="1" <?php checked((int) ($settings['use_places_api_summary'] ?? 0), 1); ?> />
+                                        <?php esc_html_e('Use Places API totals for top summary (requires Place ID + API key)', 'dope-studio-business-reviews-slider-lite'); ?>
+                                    </label>
+                                </div>
+                            </details>
+
+                            <p class="grs-status" id="grs-step2-fetch-status"></p>
+                            <div class="grs-fetch-confirm" id="grs-fetch-confirm" style="display:none; gap:8px;">
+                                <button type="button" class="button" id="grs-fetch-retry" style="display:none;"><?php esc_html_e('Try again', 'dope-studio-business-reviews-slider-lite'); ?></button>
+                            </div>
+                        </section>
+
+                        <section class="grs-wizard-step" data-step="3">
+                            <h3><?php esc_html_e('Step 3: Configure your slider style and behavior', 'dope-studio-business-reviews-slider-lite'); ?></h3>
+                            <p class="description"><?php esc_html_e('Set up your slider appearance.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+
+                            <div class="grs-field">
+                                <label for="grs_show_no_comment">
+                                    <input id="grs_show_no_comment" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_no_comment]" value="1" <?php checked((int) ($settings['show_no_comment'] ?? 0), 1); ?> />
+                                    <?php esc_html_e('Hide reviews without comment?', 'dope-studio-business-reviews-slider-lite'); ?>
+                                </label>
+                                <p class="description"><?php esc_html_e('Turn this on to show only reviews that contain written text. Ratings-only reviews will be hidden.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field">
+                                <label for="grs_show_summary_default">
+                                    <input id="grs_show_summary_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_summary_default]" value="1" <?php checked((int) ($settings['show_summary_default'] ?? 1), 1); ?> />
+                                    <?php esc_html_e('Show top summary block?', 'dope-studio-business-reviews-slider-lite'); ?>
+                                </label>
+                                <p class="description"><?php esc_html_e('The top summary block is the header area above the slider with overall stars and total review count.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field grs-summary-dependent">
+                                <label for="grs_review_count_mode"><?php esc_html_e('Header review count source', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                <select id="grs_review_count_mode" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[review_count_mode]">
+                                    <option value="fetched" <?php selected(($settings['review_count_mode'] ?? 'fetched'), 'fetched'); ?>><?php esc_html_e('Use fetched reviews count', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                    <option value="custom" <?php selected(($settings['review_count_mode'] ?? ''), 'custom'); ?>><?php esc_html_e('Use custom count', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                </select>
+                                <p class="description"><?php esc_html_e('Choose whether the summary should show the real number of fetched reviews, or a number you set manually.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field grs-summary-dependent" id="grs-custom-review-count-wrap">
+                                <label for="grs_custom_review_count"><?php esc_html_e('Custom review count', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                <input id="grs_custom_review_count" type="number" min="0" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[custom_review_count]" value="<?php echo esc_attr((string) ($settings['custom_review_count'] ?? 0)); ?>" />
+                                <p class="description"><?php esc_html_e('Used only when Header review count source is set to custom.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field grs-summary-dependent">
+                                <label for="grs_rating_mode_default"><?php esc_html_e('Star rating source', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                <select id="grs_rating_mode_default" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[rating_mode_default]">
+                                    <option value="auto" <?php selected(($settings['rating_mode_default'] ?? 'auto'), 'auto'); ?>><?php esc_html_e('Auto (from fetched reviews)', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                    <option value="manual" <?php selected(($settings['rating_mode_default'] ?? ''), 'manual'); ?>><?php esc_html_e('Manual', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                </select>
+                                <p class="description"><?php esc_html_e('Auto calculates stars from fetched reviews and can differ from your public Google profile rating. Use Manual if you need an exact value.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field grs-summary-dependent" id="grs-manual-rating-wrap">
+                                <label for="grs_manual_rating_default"><?php esc_html_e('Manual star rating (0-5)', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                <input id="grs_manual_rating_default" type="number" min="0" max="5" step="0.1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[manual_rating_default]" value="<?php echo esc_attr((string) ($settings['manual_rating_default'] ?? 5)); ?>" />
+                                <p class="description"><?php esc_html_e('This value is used only when Star rating source is set to Manual.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field">
+                                <label for="grs_display_limit_default"><?php esc_html_e('How many reviews to display?', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                <input id="grs_display_limit_default" type="number" min="6" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[display_limit_default]" value="<?php echo esc_attr((string) (((int) ($settings['display_limit_default_touched'] ?? 0) === 1 && (int) ($settings['display_limit_default'] ?? 0) > 0) ? (int) ($settings['display_limit_default'] ?? 0) : '')); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider-lite'); ?>" />
+                                <p class="description"><?php esc_html_e('Frontend display only: this controls how many reviews are shown on your site from the fetched pool.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field">
+                                <label for="grs_show_read_on_google_default">
+                                    <input id="grs_show_read_on_google_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_read_on_google_default]" value="1" <?php checked((int) ($settings['show_read_on_google_default'] ?? 1), 1); ?> />
+                                    <?php esc_html_e('Show review link button?', 'dope-studio-business-reviews-slider-lite'); ?>
+                                </label>
+                                <p class="description"><?php esc_html_e('Shows a button on each card that opens the original review on Google.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field">
+                                <label for="grs_show_dots_default">
+                                    <input id="grs_show_dots_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_dots_default]" value="1" <?php checked((int) ($settings['show_dots_default'] ?? 1), 1); ?> />
+                                    <?php esc_html_e('Show progress bar?', 'dope-studio-business-reviews-slider-lite'); ?>
+                                </label>
+                                <p class="description"><?php esc_html_e('Displays a visual progress indicator under the slider.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field">
+                                <label for="grs_loop_infinite_default">
+                                    <input id="grs_loop_infinite_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[loop_infinite_default]" value="1" <?php checked((int) ($settings['loop_infinite_default'] ?? 1), 1); ?> />
+                                    <?php esc_html_e('Use infinite loop?', 'dope-studio-business-reviews-slider-lite'); ?>
+                                </label>
+                                <p class="description"><?php esc_html_e('When enabled, the slider loops forever and wraps back to the beginning.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field">
+                                <label for="grs_autoplay_default">
+                                    <input id="grs_autoplay_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[autoplay_default]" value="1" <?php checked((int) ($settings['autoplay_default'] ?? 1), 1); ?> />
+                                    <?php esc_html_e('Enable autoplay?', 'dope-studio-business-reviews-slider-lite'); ?>
+                                </label>
+                                <p class="description"><?php esc_html_e('Automatically moves to the next review card after a delay.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field" id="grs-autoplay-interval-wrap">
+                                <label for="grs_autoplay_interval_default"><?php esc_html_e('Autoplay interval (ms)', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                <input id="grs_autoplay_interval_default" type="number" min="1500" max="20000" step="100" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[autoplay_interval_default]" value="<?php echo esc_attr((string) ($settings['autoplay_interval_default'] ?? 5500)); ?>" />
+                                <p class="description"><?php esc_html_e('How long each review stays visible before sliding to the next one.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <div class="grs-field">
+                                <label for="grs_theme"><?php esc_html_e('Default slider theme', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                <select id="grs_theme" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[theme]">
+                                    <option value="dark" <?php selected(($settings['theme'] ?? 'dark'), 'dark'); ?>><?php esc_html_e('Dark', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                    <option value="light" <?php selected(($settings['theme'] ?? ''), 'light'); ?>><?php esc_html_e('Light', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                </select>
+                                <p class="description"><?php esc_html_e('Choose the visual style used by default in the shortcode output.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <details class="grs-advanced-toggle">
+                                <summary><?php esc_html_e('Optional advanced slider settings', 'dope-studio-business-reviews-slider-lite'); ?></summary>
+                                <div class="grs-field">
+                                    <label for="grs_title_default"><?php esc_html_e('Slider heading text', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                    <input id="grs_title_default" type="text" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[title_default]" class="regular-text" value="<?php echo esc_attr((string) ($settings['title_default'] ?? 'Latest reviews')); ?>" />
+                                </div>
+                                <div class="grs-field">
+                                    <label for="grs_min_rating_default"><?php esc_html_e('Default rating filter', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                    <select id="grs_min_rating_default" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[min_rating_default]">
+                                        <option value="0" <?php selected((int) ($settings['min_rating_default'] ?? 0), 0); ?>><?php esc_html_e('All ratings', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                        <option value="5" <?php selected((int) ($settings['min_rating_default'] ?? 0), 5); ?>><?php esc_html_e('Only 5 stars', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                        <option value="4" <?php selected((int) ($settings['min_rating_default'] ?? 0), 4); ?>><?php esc_html_e('4 stars and above', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                        <option value="3" <?php selected((int) ($settings['min_rating_default'] ?? 0), 3); ?>><?php esc_html_e('3 stars and above', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                        <option value="2" <?php selected((int) ($settings['min_rating_default'] ?? 0), 2); ?>><?php esc_html_e('2 stars and above', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                    </select>
+                                </div>
+                                <div class="grs-field">
+                                    <label for="grs_swipe_default">
+                                        <input id="grs_swipe_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[swipe_default]" value="1" <?php checked((int) ($settings['swipe_default'] ?? 1), 1); ?> />
+                                        <?php esc_html_e('Enable touch swipe?', 'dope-studio-business-reviews-slider-lite'); ?>
+                                    </label>
+                                </div>
+                                <div class="grs-field grs-inline-grid">
+                                    <div>
+                                        <label for="grs_slides_mobile_default"><?php esc_html_e('Cards on mobile', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                        <input id="grs_slides_mobile_default" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[slides_mobile_default]" value="<?php echo esc_attr((string) ($settings['slides_mobile_default'] ?? 1)); ?>" />
+                                    </div>
+                                    <div>
+                                        <label for="grs_slides_tablet_default"><?php esc_html_e('Cards on tablet', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                        <input id="grs_slides_tablet_default" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[slides_tablet_default]" value="<?php echo esc_attr((string) ($settings['slides_tablet_default'] ?? 2)); ?>" />
+                                    </div>
+                                    <div>
+                                        <label for="grs_slides_desktop_default"><?php esc_html_e('Cards on desktop', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                        <input id="grs_slides_desktop_default" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[slides_desktop_default]" value="<?php echo esc_attr((string) ($settings['slides_desktop_default'] ?? 3)); ?>" />
+                                    </div>
+                                </div>
+                                <div class="grs-field">
+                                    <label for="grs_schema_review_limit_default"><?php esc_html_e('Schema reviews (JSON-LD)', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                    <input id="grs_schema_review_limit_default" type="number" min="1" max="100" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[schema_review_limit_default]" value="<?php echo esc_attr((string) (((int) ($settings['schema_review_limit_default_touched'] ?? 0) === 1 && (int) ($settings['schema_review_limit_default'] ?? 0) > 0) ? (int) ($settings['schema_review_limit_default'] ?? 0) : '')); ?>" placeholder="<?php esc_attr_e('Leave empty to match slider output', 'dope-studio-business-reviews-slider-lite'); ?>" />
+                                </div>
+                            </details>
+                        </section>
+
+                        <section class="grs-wizard-step" data-step="4">
+                            <h3><?php esc_html_e('Step 4: Do you want to set up cron auto-fetch?', 'dope-studio-business-reviews-slider-lite'); ?></h3>
+                            <p class="description"><?php esc_html_e('Should the plugin refresh reviews automatically on a schedule?', 'dope-studio-business-reviews-slider-lite'); ?></p>
+
+                            <div class="grs-field">
+                                <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="0" />
+                                <label for="grs_cron_enabled">
+                                    <input id="grs_cron_enabled" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="1" <?php checked((int) ($settings['cron_enabled'] ?? 0), 1); ?> />
+                                    <?php esc_html_e('Yes, enable cron auto-fetch', 'dope-studio-business-reviews-slider-lite'); ?>
+                                </label>
+                            </div>
+
+                            <div class="grs-field grs-cron-dependent">
+                                <label for="grs_cron_frequency"><?php esc_html_e('How often should we fetch?', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                <select id="grs_cron_frequency" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_frequency]">
+                                    <option value="twicedaily" <?php selected(($settings['cron_frequency'] ?? 'daily'), 'twicedaily'); ?>><?php esc_html_e('Every 12 hours', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                    <option value="daily" <?php selected(($settings['cron_frequency'] ?? 'daily'), 'daily'); ?>><?php esc_html_e('Daily', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                    <option value="dsbrsl_every_2_days" <?php selected(($settings['cron_frequency'] ?? 'daily'), 'dsbrsl_every_2_days'); ?>><?php esc_html_e('Every 2 days', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                    <option value="weekly" <?php selected(($settings['cron_frequency'] ?? 'daily'), 'weekly'); ?>><?php esc_html_e('Weekly (recommended)', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                    <option value="dsbrsl_monthly" <?php selected(($settings['cron_frequency'] ?? 'daily'), 'dsbrsl_monthly'); ?>><?php esc_html_e('Monthly', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                </select>
+                            </div>
+
+                            <div class="grs-field grs-cron-dependent">
+                                <label for="grs_cron_time"><?php esc_html_e('Start time', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                <input id="grs_cron_time" type="time" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_time]" value="<?php echo esc_attr((string) ($settings['cron_time'] ?? '03:00')); ?>" />
+                                <p class="description"><?php esc_html_e('Use your site local time.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+
+                            <details class="grs-advanced-toggle grs-cron-dependent">
+                                <summary><?php esc_html_e('Advanced cron setting', 'dope-studio-business-reviews-slider-lite'); ?></summary>
+                                <div class="grs-field">
+                                    <label for="grs_cron_max_reviews"><?php esc_html_e('How many reviews should cron fetch each run?', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                    <input id="grs_cron_max_reviews" type="number" min="1" max="50" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_max_reviews]" value="<?php echo esc_attr((string) ((int) ($settings['cron_max_reviews'] ?? 1) <= 0 ? 1 : (int) ($settings['cron_max_reviews'] ?? 1))); ?>" />
+                                    <p class="description"><?php esc_html_e('Default is 1. This overrides the initial fetch amount during cron runs so daily sync can stay lightweight and catch new reviews.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                                </div>
+                            </details>
+
+                            <div class="grs-field">
+                                <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[delete_on_uninstall]" value="0" />
+                                <label for="grs_delete_on_uninstall">
+                                    <input id="grs_delete_on_uninstall" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[delete_on_uninstall]" value="1" <?php checked((int) ($settings['delete_on_uninstall'] ?? 0), 1); ?> />
+                                    <?php esc_html_e('Delete plugin data on uninstall?', 'dope-studio-business-reviews-slider-lite'); ?>
+                                </label>
+                                <p class="description"><?php esc_html_e('Keep this off if you might upgrade to Pro and want to keep data.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            </div>
+                        </section>
+
+                        <section class="grs-wizard-step" data-step="5">
+                            <h3><?php esc_html_e('Final step: Save and copy your shortcode', 'dope-studio-business-reviews-slider-lite'); ?></h3>
+                            <p class="description"><?php esc_html_e('You are done. Save your choices, then copy shortcode and paste it on any page/post.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                            <div class="grs-shortcode-box">
+                                <code id="grs-shortcode-text">[dsbrsl_google_reviews_slider]</code>
+                                <button type="button" class="button" id="grs-copy-shortcode"><?php esc_html_e('Copy shortcode', 'dope-studio-business-reviews-slider-lite'); ?></button>
+                                <span class="grs-status" id="grs-copy-status"></span>
+                            </div>
+                        </section>
+
+                        <div class="grs-wizard-nav">
+                            <button type="button" class="button" id="grs-wizard-prev"><?php esc_html_e('Back', 'dope-studio-business-reviews-slider-lite'); ?></button>
+                            <div style="display:flex; gap:8px;">
+                                <div id="grs-wizard-save-wrap">
+                                    <button type="submit" class="button button-primary" id="grs-wizard-save"><?php esc_html_e('Save and finish', 'dope-studio-business-reviews-slider-lite'); ?></button>
+                                </div>
+                                <button type="button" class="button button-primary" id="grs-wizard-next"><?php esc_html_e('Next', 'dope-studio-business-reviews-slider-lite'); ?></button>
+                            </div>
+                        </div>
+                    </form>
+                    <?php else : ?>
                     <h2><?php esc_html_e('Settings', 'dope-studio-business-reviews-slider-lite'); ?></h2>
+                    <p class="description"><?php esc_html_e('Setup is completed. You can fine-tune all settings below or rerun the wizard anytime.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                    <p><a class="button" href="<?php echo esc_url($runWizardUrl); ?>"><?php esc_html_e('Run setup wizard again', 'dope-studio-business-reviews-slider-lite'); ?></a></p>
                     <nav class="nav-tab-wrapper" style="margin-bottom: 14px;">
                         <a href="<?php echo esc_url($tabGeneralUrl); ?>" class="nav-tab <?php echo $activeTab === 'general' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('General settings', 'dope-studio-business-reviews-slider-lite'); ?></a>
                         <a href="<?php echo esc_url($tabGoogleUrl); ?>" class="nav-tab <?php echo $activeTab === 'google' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Google settings', 'dope-studio-business-reviews-slider-lite'); ?></a>
                     </nav>
-                    <form method="post" action="options.php" id="grs-settings-form">
+
+                    <form method="post" action="options.php" id="grs-settings-form-classic" data-active-tab="<?php echo esc_attr($activeTab); ?>">
                         <?php settings_fields('dsbrsl_settings_group'); ?>
+                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[enable_google]" value="1" />
+                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_fetch_scope]" value="enabled" />
+                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[wizard_completed]" value="1" />
+                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_max_reviews]" value="<?php echo esc_attr((string) ((int) ($settings['cron_max_reviews'] ?? 1) <= 0 ? 1 : (int) ($settings['cron_max_reviews'] ?? 1))); ?>" />
+                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[title_default]" value="<?php echo esc_attr((string) ($settings['title_default'] ?? 'Latest reviews')); ?>" />
                         <table class="form-table" role="presentation">
                             <tbody>
                                 <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
                                     <th scope="row">
-                                        <label for="grs_token"><?php esc_html_e('Apify token', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                        <label for="grs_token_classic"><?php esc_html_e('Apify token', 'dope-studio-business-reviews-slider-lite'); ?></label>
                                         <details class="grs-help-inline">
                                             <summary aria-label="<?php esc_attr_e('How to get Apify token', 'dope-studio-business-reviews-slider-lite'); ?>">?</summary>
                                             <div class="grs-help-content">
@@ -554,7 +971,7 @@ JS;
                                         </details>
                                     </th>
                                     <td>
-                                        <input id="grs_token" type="password" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[token]" class="regular-text" value="<?php echo esc_attr($settings['token'] ?? ''); ?>" placeholder="apify_api_..." />
+                                        <input id="grs_token_classic" type="password" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[token]" class="regular-text" value="<?php echo esc_attr($settings['token'] ?? ''); ?>" placeholder="apify_api_..." />
                                         <p class="description"><?php esc_html_e('Apify API is used to fetch the reviews. It has a pretty generous free tier 1000 reviews+. Just register an account, create/copy your API token, and paste it here.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                         <p class="description">
                                             <a href="<?php echo esc_url('https://apify.com'); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Apify', 'dope-studio-business-reviews-slider-lite'); ?></a>
@@ -566,10 +983,52 @@ JS;
                                 <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Platforms to enable', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
-                                        <label for="grs_enable_google" style="display:block; margin-bottom:6px;">
-                                            <input id="grs_enable_google" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[enable_google]" value="1" <?php checked((int) ($settings['enable_google'] ?? 1), 1); ?> />
+                                        <label for="grs_enable_google_classic" style="display:block; margin-bottom:6px;">
+                                            <input id="grs_enable_google_classic" type="checkbox" checked="checked" />
                                             <?php esc_html_e('Enable Google reviews', 'dope-studio-business-reviews-slider-lite'); ?>
                                         </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Auto-fetch cron', 'dope-studio-business-reviews-slider-lite'); ?></th>
+                                    <td>
+                                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="0" />
+                                        <label for="grs_cron_enabled_classic">
+                                            <input id="grs_cron_enabled_classic" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="1" <?php checked((int) ($settings['cron_enabled'] ?? 0), 1); ?> />
+                                            <?php esc_html_e('Enable scheduled automatic fetch', 'dope-studio-business-reviews-slider-lite'); ?>
+                                        </label>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_cron_frequency_classic"><?php esc_html_e('Cron frequency', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <td>
+                                        <select id="grs_cron_frequency_classic" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_frequency]">
+                                            <option value="twicedaily" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'twicedaily'); ?>><?php esc_html_e('Every 12 hours', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                            <option value="daily" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'daily'); ?>><?php esc_html_e('Daily', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                            <option value="dsbrsl_every_2_days" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'dsbrsl_every_2_days'); ?>><?php esc_html_e('Every 2 days', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                            <option value="dsbrsl_monthly" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'dsbrsl_monthly'); ?>><?php esc_html_e('Once per month', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                            <option value="weekly" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'weekly'); ?>><?php esc_html_e('Weekly (recommended)', 'dope-studio-business-reviews-slider-lite'); ?></option>
+                                        </select>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                                    <th scope="row"><label for="grs_cron_time_classic"><?php esc_html_e('Cron start time', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <td>
+                                        <input id="grs_cron_time_classic" type="time" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_time]" value="<?php echo esc_attr((string) ($settings['cron_time'] ?? '03:00')); ?>" />
+                                        <p class="description"><?php esc_html_e('Site local time. The event repeats based on selected frequency.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                                        <p class="description" style="color:#b32d2e;"><?php esc_html_e('Tip: Avoid running daily full fetches of all reviews. For daily cron, run one full fetch first with Max reviews empty in the Google platform tab, then set Max reviews to 1-5 there. Existing stored reviews are kept and only new unique reviews are added, which helps avoid exhausting your Apify monthly quota.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                                    </td>
+                                </tr>
+                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
+                                    <th scope="row"><?php esc_html_e('Data cleanup', 'dope-studio-business-reviews-slider-lite'); ?></th>
+                                    <td>
+                                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[delete_on_uninstall]" value="0" />
+                                        <label for="grs_delete_on_uninstall_classic">
+                                            <input id="grs_delete_on_uninstall_classic" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[delete_on_uninstall]" value="1" <?php checked((int) ($settings['delete_on_uninstall'] ?? 0), 1); ?> />
+                                            <?php esc_html_e('Delete all plugin data when uninstalling the plugin', 'dope-studio-business-reviews-slider-lite'); ?>
+                                        </label>
+                                        <p class="description"><?php esc_html_e('Default is OFF (unchecked). Keep this OFF if you plan to migrate to Pro, so your Lite settings and cached reviews remain available for import.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                                        <p class="description"><?php esc_html_e('If enabled, Lite settings and cached reviews will be removed when you uninstall the plugin.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
@@ -577,7 +1036,7 @@ JS;
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row">
-                                        <label for="grs_place_id"><?php esc_html_e('Place ID', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                        <label for="grs_place_id_classic"><?php esc_html_e('Place ID', 'dope-studio-business-reviews-slider-lite'); ?></label>
                                         <details class="grs-help-inline">
                                             <summary aria-label="<?php esc_attr_e('How to get Place ID', 'dope-studio-business-reviews-slider-lite'); ?>">?</summary>
                                             <div class="grs-help-content">
@@ -591,13 +1050,13 @@ JS;
                                         </details>
                                     </th>
                                     <td>
-                                        <input id="grs_place_id" type="text" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[place_id]" class="regular-text" value="<?php echo esc_attr($settings['place_id'] ?? ''); ?>" placeholder="ChIJ..." />
+                                        <input id="grs_place_id_classic" type="text" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[place_id]" class="regular-text" value="<?php echo esc_attr((string) ($settings['place_id'] ?? '')); ?>" placeholder="ChIJ..." />
                                         <p class="description"><?php esc_html_e('Use either Place ID or Google Maps URL (one is enough).', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row">
-                                        <label for="grs_place_url"><?php esc_html_e('Google Maps URL', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                        <label for="grs_place_url_classic"><?php esc_html_e('Google Maps URL', 'dope-studio-business-reviews-slider-lite'); ?></label>
                                         <details class="grs-help-inline">
                                             <summary aria-label="<?php esc_attr_e('How to get Google Maps URL', 'dope-studio-business-reviews-slider-lite'); ?>">?</summary>
                                             <div class="grs-help-content">
@@ -611,13 +1070,13 @@ JS;
                                         </details>
                                     </th>
                                     <td>
-                                        <input id="grs_place_url" type="url" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[place_url]" class="regular-text" value="<?php echo esc_attr($settings['place_url'] ?? ''); ?>" placeholder="https://www.google.com/maps/place/..." />
+                                        <input id="grs_place_url_classic" type="url" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[place_url]" class="regular-text" value="<?php echo esc_attr($settings['place_url'] ?? ''); ?>" placeholder="https://www.google.com/maps/place/..." />
                                         <p class="description"><?php esc_html_e('If Google Maps URL is provided, Place ID is optional.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row">
-                                        <label for="grs_google_places_api_key"><?php esc_html_e('Google Places API key (optional)', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                        <label for="grs_google_places_api_key_classic"><?php esc_html_e('Google Places API key (optional)', 'dope-studio-business-reviews-slider-lite'); ?></label>
                                         <details class="grs-help-inline">
                                             <summary aria-label="<?php esc_attr_e('How to get Google Places API key', 'dope-studio-business-reviews-slider-lite'); ?>">?</summary>
                                             <div class="grs-help-content">
@@ -630,37 +1089,37 @@ JS;
                                             </div>
                                         </details>
                                     </th>
-                                    <td><input id="grs_google_places_api_key" type="password" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[google_places_api_key]" class="regular-text" value="<?php echo esc_attr($settings['google_places_api_key'] ?? ''); ?>" placeholder="AIza..." /></td>
+                                    <td><input id="grs_google_places_api_key_classic" type="password" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[google_places_api_key]" class="regular-text" value="<?php echo esc_attr((string) ($settings['google_places_api_key'] ?? '')); ?>" placeholder="AIza..." /></td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Places API summary (optional)', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
                                         <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[use_places_api_summary]" value="0" />
-                                        <label for="grs_use_places_api_summary">
-                                            <input id="grs_use_places_api_summary" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[use_places_api_summary]" value="1" <?php checked((int) ($settings['use_places_api_summary'] ?? 0), 1); ?> />
+                                        <label for="grs_use_places_api_summary_classic">
+                                            <input id="grs_use_places_api_summary_classic" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[use_places_api_summary]" value="1" <?php checked((int) ($settings['use_places_api_summary'] ?? 0), 1); ?> />
                                             <?php esc_html_e('Use Places API rating and total reviews in header (requires Place ID + API key).', 'dope-studio-business-reviews-slider-lite'); ?>
                                         </label>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_max_reviews"><?php esc_html_e('Max reviews', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <th scope="row"><label for="grs_max_reviews_classic"><?php esc_html_e('Max reviews', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
                                     <td>
-                                        <input id="grs_max_reviews" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[max_reviews]" value="<?php echo esc_attr((string) ((int) ($settings['max_reviews'] ?? 0) <= 0 ? '' : (int) ($settings['max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider-lite'); ?>" />
+                                        <input id="grs_max_reviews_classic" type="number" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[max_reviews]" value="<?php echo esc_attr((string) ((int) ($settings['max_reviews'] ?? 0) <= 0 ? '' : (int) ($settings['max_reviews'] ?? 0))); ?>" min="1" max="500" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider-lite'); ?>" />
                                         <p class="description"><?php esc_html_e('Leave empty to fetch all available reviews (can consume more Apify credits).', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                         <p class="description"><?php esc_html_e('Recommended workflow: fetch all reviews once initially, then set this to 1-5 for daily cron. Existing stored reviews are kept and only new unique reviews are added. This keeps Apify token usage low and helps avoid exhausting your monthly quota.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_language"><?php esc_html_e('Language', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
-                                    <td><input id="grs_language" type="text" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[language]" value="<?php echo esc_attr($settings['language'] ?? 'en'); ?>" class="small-text" /></td>
+                                    <th scope="row"><label for="grs_language_classic"><?php esc_html_e('Language', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <td><input id="grs_language_classic" type="text" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[language]" value="<?php echo esc_attr((string) ($settings['language'] ?? 'en')); ?>" class="small-text" /></td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row" colspan="2"><h3 style="margin:10px 0 0;"><?php esc_html_e('Google slider settings', 'dope-studio-business-reviews-slider-lite'); ?></h3></th>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_theme"><?php esc_html_e('Default slider theme', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <th scope="row"><label for="grs_theme_classic"><?php esc_html_e('Default slider theme', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
                                     <td>
-                                        <select id="grs_theme" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[theme]">
+                                        <select id="grs_theme_classic" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[theme]">
                                             <option value="dark" <?php selected(($settings['theme'] ?? 'dark'), 'dark'); ?>><?php esc_html_e('Dark', 'dope-studio-business-reviews-slider-lite'); ?></option>
                                             <option value="light" <?php selected(($settings['theme'] ?? ''), 'light'); ?>><?php esc_html_e('Light', 'dope-studio-business-reviews-slider-lite'); ?></option>
                                         </select>
@@ -669,8 +1128,8 @@ JS;
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Reviews without comment', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
-                                        <label for="grs_show_no_comment">
-                                            <input id="grs_show_no_comment" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_no_comment]" value="1" <?php checked((int) ($settings['show_no_comment'] ?? 1), 1); ?> />
+                                        <label for="grs_show_no_comment_classic">
+                                            <input id="grs_show_no_comment_classic" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_no_comment]" value="1" <?php checked((int) ($settings['show_no_comment'] ?? 0), 1); ?> />
                                             <?php esc_html_e('Hide ratings-only reviews (no text comment)', 'dope-studio-business-reviews-slider-lite'); ?>
                                         </label>
                                     </td>
@@ -678,66 +1137,24 @@ JS;
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Autoplay', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
-                                        <label for="grs_autoplay_default">
-                                            <input id="grs_autoplay_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[autoplay_default]" value="1" <?php checked((int) ($settings['autoplay_default'] ?? 1), 1); ?> />
+                                        <label for="grs_autoplay_default_classic">
+                                            <input id="grs_autoplay_default_classic" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[autoplay_default]" value="1" <?php checked((int) ($settings['autoplay_default'] ?? 1), 1); ?> />
                                             <?php esc_html_e('Enable automatic sliding by default', 'dope-studio-business-reviews-slider-lite'); ?>
                                         </label>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_autoplay_interval_default"><?php esc_html_e('Autoplay interval (ms)', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <th scope="row"><label for="grs_autoplay_interval_default_classic"><?php esc_html_e('Autoplay interval (ms)', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
                                     <td>
-                                        <input id="grs_autoplay_interval_default" type="number" min="1500" max="20000" step="100" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[autoplay_interval_default]" value="<?php echo esc_attr((string) ($settings['autoplay_interval_default'] ?? 5500)); ?>" />
+                                        <input id="grs_autoplay_interval_default_classic" type="number" min="1500" max="20000" step="100" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[autoplay_interval_default]" value="<?php echo esc_attr((string) ($settings['autoplay_interval_default'] ?? 5500)); ?>" />
                                         <p class="description"><?php esc_html_e('Default autoplay speed for the widget.', 'dope-studio-business-reviews-slider-lite'); ?></p>
-                                    </td>
-                                </tr>
-                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
-                                    <th scope="row"><?php esc_html_e('Auto-fetch cron', 'dope-studio-business-reviews-slider-lite'); ?></th>
-                                    <td>
-                                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="0" />
-                                        <label for="grs_cron_enabled">
-                                            <input id="grs_cron_enabled" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_enabled]" value="1" <?php checked((int) ($settings['cron_enabled'] ?? 0), 1); ?> />
-                                            <?php esc_html_e('Enable scheduled automatic fetch', 'dope-studio-business-reviews-slider-lite'); ?>
-                                        </label>
-                                    </td>
-                                </tr>
-                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_cron_frequency"><?php esc_html_e('Cron frequency', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
-                                    <td>
-                                        <select id="grs_cron_frequency" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_frequency]">
-                                            <option value="twicedaily" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'twicedaily'); ?>><?php esc_html_e('Every 12 hours', 'dope-studio-business-reviews-slider-lite'); ?></option>
-                                            <option value="daily" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'daily'); ?>><?php esc_html_e('Daily', 'dope-studio-business-reviews-slider-lite'); ?></option>
-                                            <option value="dsbrsl_every_2_days" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'dsbrsl_every_2_days'); ?>><?php esc_html_e('Every 2 days', 'dope-studio-business-reviews-slider-lite'); ?></option>
-                                            <option value="dsbrsl_monthly" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'dsbrsl_monthly'); ?>><?php esc_html_e('Once per month', 'dope-studio-business-reviews-slider-lite'); ?></option>
-                                            <option value="weekly" <?php selected(($settings['cron_frequency'] ?? 'weekly'), 'weekly'); ?>><?php esc_html_e('Weekly (recommended)', 'dope-studio-business-reviews-slider-lite'); ?></option>
-                                        </select>
-                                    </td>
-                                </tr>
-                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_cron_time"><?php esc_html_e('Cron start time', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
-                                    <td>
-                                        <input id="grs_cron_time" type="time" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[cron_time]" value="<?php echo esc_attr((string) ($settings['cron_time'] ?? '03:00')); ?>" />
-                                        <p class="description"><?php esc_html_e('Site local time. The event repeats based on selected frequency.', 'dope-studio-business-reviews-slider-lite'); ?></p>
-                                        <p class="description" style="color:#b32d2e;"><?php esc_html_e('Tip: Avoid running daily full fetches of all reviews. For daily cron, run one full fetch first with Max reviews empty in the Google platform tab, then set Max reviews to 1-5 there. Existing stored reviews are kept and only new unique reviews are added, which helps avoid exhausting your Apify monthly quota.', 'dope-studio-business-reviews-slider-lite'); ?></p>
-                                    </td>
-                                </tr>
-                                <tr<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
-                                    <th scope="row"><?php esc_html_e('Data cleanup', 'dope-studio-business-reviews-slider-lite'); ?></th>
-                                    <td>
-                                        <input type="hidden" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[delete_on_uninstall]" value="0" />
-                                        <label for="grs_delete_on_uninstall">
-                                            <input id="grs_delete_on_uninstall" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[delete_on_uninstall]" value="1" <?php checked((int) ($settings['delete_on_uninstall'] ?? 0), 1); ?> />
-                                            <?php esc_html_e('Delete all plugin data when uninstalling the plugin', 'dope-studio-business-reviews-slider-lite'); ?>
-                                        </label>
-                                        <p class="description"><?php esc_html_e('Default is OFF (unchecked). Keep this OFF if you plan to migrate to Pro, so your Lite settings and cached reviews remain available for import.', 'dope-studio-business-reviews-slider-lite'); ?></p>
-                                        <p class="description"><?php esc_html_e('If enabled, Lite settings and cached reviews will be removed when you uninstall the plugin.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Infinite loop', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
-                                        <label for="grs_loop_infinite_default">
-                                            <input id="grs_loop_infinite_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[loop_infinite_default]" value="1" <?php checked((int) ($settings['loop_infinite_default'] ?? 0), 1); ?> />
+                                        <label for="grs_loop_infinite_default_classic">
+                                            <input id="grs_loop_infinite_default_classic" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[loop_infinite_default]" value="1" <?php checked((int) ($settings['loop_infinite_default'] ?? 1), 1); ?> />
                                             <?php esc_html_e('Loop slides infinitely and fill incomplete last page with next reviews', 'dope-studio-business-reviews-slider-lite'); ?>
                                         </label>
                                     </td>
@@ -745,8 +1162,8 @@ JS;
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Progress bar', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
-                                        <label for="grs_show_dots_default">
-                                            <input id="grs_show_dots_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_dots_default]" value="1" <?php checked((int) ($settings['show_dots_default'] ?? 1), 1); ?> />
+                                        <label for="grs_show_dots_default_classic">
+                                            <input id="grs_show_dots_default_classic" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_dots_default]" value="1" <?php checked((int) ($settings['show_dots_default'] ?? 1), 1); ?> />
                                             <?php esc_html_e('Show slider progress bar', 'dope-studio-business-reviews-slider-lite'); ?>
                                         </label>
                                     </td>
@@ -754,8 +1171,8 @@ JS;
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Top summary block', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
-                                        <label for="grs_show_summary_default">
-                                            <input id="grs_show_summary_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_summary_default]" value="1" <?php checked((int) ($settings['show_summary_default'] ?? 1), 1); ?> />
+                                        <label for="grs_show_summary_default_classic">
+                                            <input id="grs_show_summary_default_classic" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_summary_default]" value="1" <?php checked((int) ($settings['show_summary_default'] ?? 1), 1); ?> />
                                             <?php esc_html_e('Show top block with overall rating information', 'dope-studio-business-reviews-slider-lite'); ?>
                                         </label>
                                     </td>
@@ -763,16 +1180,16 @@ JS;
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Review link button', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
-                                        <label for="grs_show_read_on_google_default">
-                                            <input id="grs_show_read_on_google_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_read_on_google_default]" value="1" <?php checked((int) ($settings['show_read_on_google_default'] ?? 1), 1); ?> />
+                                        <label for="grs_show_read_on_google_default_classic">
+                                            <input id="grs_show_read_on_google_default_classic" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[show_read_on_google_default]" value="1" <?php checked((int) ($settings['show_read_on_google_default'] ?? 1), 1); ?> />
                                             <?php esc_html_e('Show "Read on Google" button on cards', 'dope-studio-business-reviews-slider-lite'); ?>
                                         </label>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_rating_mode_default"><?php esc_html_e('Star rating source', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <th scope="row"><label for="grs_rating_mode_default_classic"><?php esc_html_e('Star rating source', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
                                     <td>
-                                        <select id="grs_rating_mode_default" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[rating_mode_default]">
+                                        <select id="grs_rating_mode_default_classic" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[rating_mode_default]">
                                             <option value="auto" <?php selected(($settings['rating_mode_default'] ?? 'auto'), 'auto'); ?>><?php esc_html_e('Auto (from fetched reviews)', 'dope-studio-business-reviews-slider-lite'); ?></option>
                                             <option value="manual" <?php selected(($settings['rating_mode_default'] ?? ''), 'manual'); ?>><?php esc_html_e('Manual', 'dope-studio-business-reviews-slider-lite'); ?></option>
                                         </select>
@@ -780,17 +1197,17 @@ JS;
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_manual_rating_default"><?php esc_html_e('Star manual rating (0-5)', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <th scope="row"><label for="grs_manual_rating_default_classic"><?php esc_html_e('Star manual rating (0-5)', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
                                     <td>
-                                        <input id="grs_manual_rating_default" type="number" min="0" max="5" step="0.1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[manual_rating_default]" value="<?php echo esc_attr((string) ($settings['manual_rating_default'] ?? 5)); ?>" />
+                                        <input id="grs_manual_rating_default_classic" type="number" min="0" max="5" step="0.1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[manual_rating_default]" value="<?php echo esc_attr((string) ($settings['manual_rating_default'] ?? 5)); ?>" />
                                         <p class="description"><?php esc_html_e('Used when Star rating source is set to Manual.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Swipe', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
-                                        <label for="grs_swipe_default">
-                                            <input id="grs_swipe_default" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[swipe_default]" value="1" <?php checked((int) ($settings['swipe_default'] ?? 1), 1); ?> />
+                                        <label for="grs_swipe_default_classic">
+                                            <input id="grs_swipe_default_classic" type="checkbox" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[swipe_default]" value="1" <?php checked((int) ($settings['swipe_default'] ?? 1), 1); ?> />
                                             <?php esc_html_e('Enable touch swipe on mobile/tablet', 'dope-studio-business-reviews-slider-lite'); ?>
                                         </label>
                                     </td>
@@ -798,35 +1215,35 @@ JS;
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
                                     <th scope="row"><?php esc_html_e('Cards per view', 'dope-studio-business-reviews-slider-lite'); ?></th>
                                     <td>
-                                        <label for="grs_slides_mobile_default"><?php esc_html_e('Mobile', 'dope-studio-business-reviews-slider-lite'); ?></label>
-                                        <input id="grs_slides_mobile_default" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[slides_mobile_default]" value="<?php echo esc_attr((string) ($settings['slides_mobile_default'] ?? 1)); ?>" />
+                                        <label for="grs_slides_mobile_default_classic"><?php esc_html_e('Mobile', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                        <input id="grs_slides_mobile_default_classic" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[slides_mobile_default]" value="<?php echo esc_attr((string) ($settings['slides_mobile_default'] ?? 1)); ?>" />
                                         &nbsp;&nbsp;
-                                        <label for="grs_slides_tablet_default"><?php esc_html_e('Tablet', 'dope-studio-business-reviews-slider-lite'); ?></label>
-                                        <input id="grs_slides_tablet_default" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[slides_tablet_default]" value="<?php echo esc_attr((string) ($settings['slides_tablet_default'] ?? 2)); ?>" />
+                                        <label for="grs_slides_tablet_default_classic"><?php esc_html_e('Tablet', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                        <input id="grs_slides_tablet_default_classic" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[slides_tablet_default]" value="<?php echo esc_attr((string) ($settings['slides_tablet_default'] ?? 2)); ?>" />
                                         &nbsp;&nbsp;
-                                        <label for="grs_slides_desktop_default"><?php esc_html_e('Desktop', 'dope-studio-business-reviews-slider-lite'); ?></label>
-                                        <input id="grs_slides_desktop_default" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[slides_desktop_default]" value="<?php echo esc_attr((string) ($settings['slides_desktop_default'] ?? 3)); ?>" />
+                                        <label for="grs_slides_desktop_default_classic"><?php esc_html_e('Desktop', 'dope-studio-business-reviews-slider-lite'); ?></label>
+                                        <input id="grs_slides_desktop_default_classic" type="number" min="1" max="6" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[slides_desktop_default]" value="<?php echo esc_attr((string) ($settings['slides_desktop_default'] ?? 3)); ?>" />
                                         <p class="description"><?php esc_html_e('How many review cards to show at once by device size.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_display_limit_default"><?php esc_html_e('Reviews to display', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <th scope="row"><label for="grs_display_limit_default_classic"><?php esc_html_e('Reviews to display', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
                                     <td>
-                                        <input id="grs_display_limit_default" type="number" min="6" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[display_limit_default]" value="<?php echo esc_attr((string) ((int) ($settings['display_limit_default'] ?? 0) <= 0 ? '' : (int) ($settings['display_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider-lite'); ?>" />
+                                        <input id="grs_display_limit_default_classic" type="number" min="6" max="500" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[display_limit_default]" value="<?php echo esc_attr((string) (((int) ($settings['display_limit_default_touched'] ?? 0) === 1 && (int) ($settings['display_limit_default'] ?? 0) > 0) ? (int) ($settings['display_limit_default'] ?? 0) : '')); ?>" placeholder="<?php esc_attr_e('Leave empty for all', 'dope-studio-business-reviews-slider-lite'); ?>" />
                                         <p class="description"><?php esc_html_e('Frontend only: limit shown reviews. Leave empty to show all fetched reviews. Minimum when set: 6. Applied after filters (no-comment/rating).', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_schema_review_limit_default"><?php esc_html_e('Schema reviews (JSON-LD)', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <th scope="row"><label for="grs_schema_review_limit_default_classic"><?php esc_html_e('Schema reviews (JSON-LD)', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
                                     <td>
-                                        <input id="grs_schema_review_limit_default" type="number" min="1" max="100" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[schema_review_limit_default]" value="<?php echo esc_attr((string) ((int) ($settings['schema_review_limit_default'] ?? 0) <= 0 ? '' : (int) ($settings['schema_review_limit_default'] ?? 0))); ?>" placeholder="<?php esc_attr_e('Leave empty to match slider output', 'dope-studio-business-reviews-slider-lite'); ?>" />
+                                        <input id="grs_schema_review_limit_default_classic" type="number" min="1" max="100" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[schema_review_limit_default]" value="<?php echo esc_attr((string) (((int) ($settings['schema_review_limit_default_touched'] ?? 0) === 1 && (int) ($settings['schema_review_limit_default'] ?? 0) > 0) ? (int) ($settings['schema_review_limit_default'] ?? 0) : '')); ?>" placeholder="<?php esc_attr_e('Leave empty to match slider output', 'dope-studio-business-reviews-slider-lite'); ?>" />
                                         <p class="description"><?php esc_html_e('Leave empty to use exactly the reviews shown by the slider after filters/limits. Set a number only if you want fewer schema reviews than displayed.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_min_rating_default"><?php esc_html_e('Default rating filter', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <th scope="row"><label for="grs_min_rating_default_classic"><?php esc_html_e('Default rating filter', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
                                     <td>
-                                        <select id="grs_min_rating_default" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[min_rating_default]">
+                                        <select id="grs_min_rating_default_classic" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[min_rating_default]">
                                             <option value="0" <?php selected((int) ($settings['min_rating_default'] ?? 0), 0); ?>><?php esc_html_e('All ratings', 'dope-studio-business-reviews-slider-lite'); ?></option>
                                             <option value="5" <?php selected((int) ($settings['min_rating_default'] ?? 0), 5); ?>><?php esc_html_e('Only 5 stars', 'dope-studio-business-reviews-slider-lite'); ?></option>
                                             <option value="4" <?php selected((int) ($settings['min_rating_default'] ?? 0), 4); ?>><?php esc_html_e('4 stars and above', 'dope-studio-business-reviews-slider-lite'); ?></option>
@@ -836,9 +1253,9 @@ JS;
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_review_count_mode"><?php esc_html_e('Header review count source', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <th scope="row"><label for="grs_review_count_mode_classic"><?php esc_html_e('Header review count source', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
                                     <td>
-                                        <select id="grs_review_count_mode" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[review_count_mode]">
+                                        <select id="grs_review_count_mode_classic" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[review_count_mode]">
                                             <option value="fetched" <?php selected(($settings['review_count_mode'] ?? 'fetched'), 'fetched'); ?>><?php esc_html_e('Use fetched reviews count', 'dope-studio-business-reviews-slider-lite'); ?></option>
                                             <option value="custom" <?php selected(($settings['review_count_mode'] ?? ''), 'custom'); ?>><?php esc_html_e('Use custom count', 'dope-studio-business-reviews-slider-lite'); ?></option>
                                         </select>
@@ -846,9 +1263,9 @@ JS;
                                     </td>
                                 </tr>
                                 <tr<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                                    <th scope="row"><label for="grs_custom_review_count"><?php esc_html_e('Custom review count', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
+                                    <th scope="row"><label for="grs_custom_review_count_classic"><?php esc_html_e('Custom review count', 'dope-studio-business-reviews-slider-lite'); ?></label></th>
                                     <td>
-                                        <input id="grs_custom_review_count" type="number" min="0" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[custom_review_count]" value="<?php echo esc_attr((string) ($settings['custom_review_count'] ?? 0)); ?>" />
+                                        <input id="grs_custom_review_count_classic" type="number" min="0" step="1" name="<?php echo esc_attr(self::SETTINGS_OPTION); ?>[custom_review_count]" value="<?php echo esc_attr((string) ($settings['custom_review_count'] ?? 0)); ?>" />
                                         <p class="description"><?php esc_html_e('Used only when "Use custom count" is selected.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                                     </td>
                                 </tr>
@@ -856,19 +1273,7 @@ JS;
                         </table>
                         <?php submit_button(__('Save settings', 'dope-studio-business-reviews-slider-lite')); ?>
                     </form>
-
-                    <div class="grs-fetch-row"<?php echo $rowStyleGeneral !== '' ? ' style="' . esc_attr($rowStyleGeneral) . '"' : ''; ?>>
-                        <button type="button" class="button button-primary grs-fetch-btn" data-grs-fetch-scope="all">
-                            <?php esc_html_e('Fetch all reviews', 'dope-studio-business-reviews-slider-lite'); ?>
-                        </button>
-                        <span class="grs-status grs-fetch-status"></span>
-                    </div>
-                    <div class="grs-fetch-row"<?php echo $rowStyleGoogle !== '' ? ' style="' . esc_attr($rowStyleGoogle) . '"' : ''; ?>>
-                        <button type="button" class="button button-primary grs-fetch-btn" data-grs-fetch-scope="google">
-                            <?php esc_html_e('Fetch Google reviews', 'dope-studio-business-reviews-slider-lite'); ?>
-                        </button>
-                        <span class="grs-status grs-fetch-status"></span>
-                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <div class="grs-card grs-info">
@@ -894,7 +1299,7 @@ JS;
                     <p><?php esc_html_e('Optional attributes:', 'dope-studio-business-reviews-slider-lite'); ?> <code>theme="dark|light" limit="0" autoplay="1" interval="5500" loop="0|1" show_dots="0|1" swipe="0|1" mobile="1-6" tablet="1-6" desktop="1-6" show_summary="0|1" show_read_on_google="0|1" rating_mode="auto|manual" manual_rating="0-5" min_rating="0|2|3|4|5" show_no_comment="1"</code></p>
                     <p class="description"><?php esc_html_e('These attributes are optional. If you configure settings in the admin panel, use the default shortcode without attributes and those settings will be applied automatically.', 'dope-studio-business-reviews-slider-lite'); ?></p>
                     <p class="description"><?php esc_html_e('If you add attributes in the shortcode, they override the admin settings for that shortcode instance only. This lets you place different slider variations on different pages.', 'dope-studio-business-reviews-slider-lite'); ?></p>
-                    <p class="description"><?php esc_html_e('show_no_comment="1" hides ratings-only reviews without text comments.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                    
 
                     <hr />
                     <p><strong><?php esc_html_e('Need more platforms and features? Download Pro for free:', 'dope-studio-business-reviews-slider-lite'); ?></strong></p>
@@ -925,6 +1330,47 @@ JS;
         }
 
         $settings = get_option(self::SETTINGS_OPTION, []);
+
+        $draftSettingsRaw = isset($_POST['draft_settings']) ? wp_unslash((string) $_POST['draft_settings']) : '';
+        if ($draftSettingsRaw !== '') {
+            $draftSettings = json_decode($draftSettingsRaw, true);
+            if (is_array($draftSettings)) {
+                $draftToken = isset($draftSettings['token']) ? sanitize_text_field((string) $draftSettings['token']) : '';
+                if ($draftToken !== '') {
+                    $settings['token'] = $draftToken;
+                }
+
+                if (isset($draftSettings['place_url'])) {
+                    $settings['place_url'] = esc_url_raw((string) $draftSettings['place_url']);
+                }
+
+                if (isset($draftSettings['place_id'])) {
+                    $settings['place_id'] = sanitize_text_field((string) $draftSettings['place_id']);
+                }
+
+                if (isset($draftSettings['max_reviews'])) {
+                    $maxReviewsRaw = trim((string) $draftSettings['max_reviews']);
+                    if ($maxReviewsRaw === '') {
+                        $settings['max_reviews'] = 0;
+                    } else {
+                        $settings['max_reviews'] = max(1, min(500, absint($maxReviewsRaw)));
+                    }
+                }
+
+                if (isset($draftSettings['language'])) {
+                    $settings['language'] = sanitize_text_field((string) $draftSettings['language']);
+                }
+
+                if (isset($draftSettings['google_places_api_key'])) {
+                    $settings['google_places_api_key'] = sanitize_text_field((string) $draftSettings['google_places_api_key']);
+                }
+
+                if (isset($draftSettings['use_places_api_summary'])) {
+                    $settings['use_places_api_summary'] = ((string) $draftSettings['use_places_api_summary'] === '1') ? 1 : 0;
+                }
+            }
+        }
+
         $token = isset($settings['token']) ? trim((string) $settings['token']) : '';
         if ($token === '') {
             wp_send_json_error([
@@ -965,6 +1411,12 @@ JS;
         if ($token === '') {
             return;
         }
+
+        $cronMaxReviews = isset($settings['cron_max_reviews']) ? absint($settings['cron_max_reviews']) : 1;
+        if ($cronMaxReviews <= 0) {
+            $cronMaxReviews = 1;
+        }
+        $settings['max_reviews'] = $cronMaxReviews;
 
         $this->fetch_google_reviews($settings, $token);
     }
@@ -1379,14 +1831,16 @@ JS;
         $defaultTheme = isset($settings['theme']) ? (string) $settings['theme'] : 'dark';
         $defaultAutoplay = isset($settings['autoplay_default']) ? (int) $settings['autoplay_default'] : 1;
         $defaultInterval = isset($settings['autoplay_interval_default']) ? max(1500, min(20000, absint($settings['autoplay_interval_default']))) : 5500;
-        $defaultLoop = isset($settings['loop_infinite_default']) ? (int) $settings['loop_infinite_default'] : 0;
+        $defaultLoop = isset($settings['loop_infinite_default']) ? (int) $settings['loop_infinite_default'] : 1;
         $defaultShowDots = isset($settings['show_dots_default']) ? (int) $settings['show_dots_default'] : 1;
         $defaultSwipe = isset($settings['swipe_default']) ? (int) $settings['swipe_default'] : 1;
         $defaultMobile = isset($settings['slides_mobile_default']) ? max(1, min(6, absint($settings['slides_mobile_default']))) : 1;
         $defaultTablet = isset($settings['slides_tablet_default']) ? max(1, min(6, absint($settings['slides_tablet_default']))) : 2;
         $defaultDesktop = isset($settings['slides_desktop_default']) ? max(1, min(6, absint($settings['slides_desktop_default']))) : 3;
-        $defaultDisplayLimit = isset($settings['display_limit_default']) ? max(0, min(500, absint($settings['display_limit_default']))) : 0;
-        $defaultSchemaReviewLimit = isset($settings['schema_review_limit_default']) ? max(0, min(100, absint($settings['schema_review_limit_default']))) : 0;
+        $defaultDisplayLimitTouched = isset($settings['display_limit_default_touched']) ? (int) $settings['display_limit_default_touched'] : 0;
+        $defaultDisplayLimit = $defaultDisplayLimitTouched === 1 && isset($settings['display_limit_default']) ? max(0, min(500, absint($settings['display_limit_default']))) : 0;
+        $defaultSchemaReviewLimitTouched = isset($settings['schema_review_limit_default_touched']) ? (int) $settings['schema_review_limit_default_touched'] : 0;
+        $defaultSchemaReviewLimit = $defaultSchemaReviewLimitTouched === 1 && isset($settings['schema_review_limit_default']) ? max(1, min(100, absint($settings['schema_review_limit_default']))) : 0;
         $defaultShowSummary = isset($settings['show_summary_default']) ? (int) $settings['show_summary_default'] : 1;
         $defaultShowReadOnGoogle = isset($settings['show_read_on_google_default']) ? (int) $settings['show_read_on_google_default'] : 1;
         $defaultRatingMode = isset($settings['rating_mode_default']) ? (string) $settings['rating_mode_default'] : 'auto';

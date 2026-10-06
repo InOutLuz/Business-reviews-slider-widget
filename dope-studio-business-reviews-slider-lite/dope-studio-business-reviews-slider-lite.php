@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider Lite
  * Description: Fetch and display Google reviews with a customizable slider widget.
- * Version: 1.0.16
+ * Version: 1.0.17
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * License: GPL-2.0+
@@ -16,7 +16,7 @@ if (! defined('ABSPATH')) {
 
 class DSBRSL_Google_Reviews_Slider_Lite
 {
-    private const PLUGIN_VERSION = '1.0.16';
+    private const PLUGIN_VERSION = '1.0.17';
     private const SETTINGS_OPTION = 'dsbrsl_settings';
     private const CACHE_OPTION = 'dsbrsl_reviews_cache';
     private const SHORTCODE_GOOGLE = 'dsbrsl_google_reviews_slider';
@@ -1278,14 +1278,14 @@ JS;
 
                 <div class="grs-card grs-info">
                     <h2><?php esc_html_e('Data status', 'dope-studio-business-reviews-slider-lite'); ?></h2>
-                    <p><strong><?php echo esc_html((string) $count); ?></strong> <?php esc_html_e('reviews stored in DB.', 'dope-studio-business-reviews-slider-lite'); ?></p>
-                    <p class="description"><?php
+                    <p><strong id="grs-data-status-count"><?php echo esc_html((string) $count); ?></strong> <?php esc_html_e('reviews stored in DB.', 'dope-studio-business-reviews-slider-lite'); ?></p>
+                    <p class="description" id="grs-data-status-google"><?php
                         /* translators: %d: Number of Google reviews in cache. */
                         echo esc_html(sprintf(__('Google: %d', 'dope-studio-business-reviews-slider-lite'), (int) $googleCount));
                     ?></p>
                     <p>
                         <?php esc_html_e('Last update:', 'dope-studio-business-reviews-slider-lite'); ?>
-                        <strong><?php echo $updated ? esc_html(date_i18n(get_option('date_format') . ' ' . get_option('time_format'), (int) $updated)) : esc_html__('Never', 'dope-studio-business-reviews-slider-lite'); ?></strong>
+                        <strong id="grs-data-status-updated"><?php echo $updated ? esc_html(date_i18n(get_option('date_format') . ' ' . get_option('time_format'), (int) $updated)) : esc_html__('Never', 'dope-studio-business-reviews-slider-lite'); ?></strong>
                     </p>
                     <p>
                         <?php esc_html_e('Next scheduled fetch:', 'dope-studio-business-reviews-slider-lite'); ?>
@@ -1391,6 +1391,12 @@ JS;
                 _n('Loaded %d review.', 'Loaded %d reviews.', (int) $result['count'], 'dope-studio-business-reviews-slider-lite'),
                 (int) $result['count']
             ),
+            'count' => (int) ($result['count'] ?? 0),
+            'total' => (int) ($result['total'] ?? 0),
+            'stored_count' => (int) ($result['stored_count'] ?? 0),
+            'updated_at_text' => isset($result['updated_at']) && (int) $result['updated_at'] > 0
+                ? date_i18n(get_option('date_format') . ' ' . get_option('time_format'), (int) $result['updated_at'])
+                : __('Never', 'dope-studio-business-reviews-slider-lite'),
         ]);
     }
 
@@ -1636,6 +1642,8 @@ JS;
             'success' => true,
             'count'   => count($reviews),
             'total'   => $totalReviews,
+            'stored_count' => count($mergedReviews),
+            'updated_at' => time(),
         ];
     }
 
@@ -1701,18 +1709,53 @@ JS;
 
     private function review_dedupe_key(array $review): string
     {
-        $url = trim((string) ($review['url'] ?? ''));
-        if ($url !== '') {
-            return 'url:' . $url;
-        }
-
         $author = mb_strtolower(trim((string) ($review['author'] ?? '')));
         $date = trim((string) ($review['date'] ?? ''));
         $rating = number_format((float) ($review['rating'] ?? 0), 2, '.', '');
         $headline = mb_strtolower(trim((string) ($review['headline'] ?? '')));
         $text = mb_strtolower(trim((string) ($review['text'] ?? '')));
+        $url = $this->normalise_review_identity_url((string) ($review['url'] ?? ''));
 
-        return 'hash:' . md5($author . '|' . $date . '|' . $rating . '|' . $headline . '|' . $text);
+        if ($author !== '' || $date !== '' || $text !== '' || $headline !== '' || $rating !== '0.00') {
+            return 'hash:' . md5($author . '|' . $date . '|' . $rating . '|' . $headline . '|' . $text);
+        }
+
+        if ($url !== '') {
+            return 'url:' . $url;
+        }
+
+        return 'raw:' . md5(wp_json_encode($review));
+    }
+
+    private function normalise_review_identity_url(string $url): string
+    {
+        $url = trim($url);
+        if ($url === '') {
+            return '';
+        }
+
+        $parts = wp_parse_url($url);
+        if (! is_array($parts)) {
+            return $url;
+        }
+
+        $scheme = isset($parts['scheme']) ? strtolower((string) $parts['scheme']) . '://' : '';
+        $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
+        $path = isset($parts['path']) ? (string) $parts['path'] : '';
+        $query = [];
+
+        if (isset($parts['query'])) {
+            parse_str((string) $parts['query'], $query);
+            unset($query['hl'], $query['gl']);
+            ksort($query);
+        }
+
+        $normalised = $scheme . $host . $path;
+        if (! empty($query)) {
+            $normalised .= '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        }
+
+        return $normalised;
     }
 
     private function render_review_schema_script(array $reviews, float $ratingValue, int $reviewCount, string $headline = '', int $maxReviewItems = 0): string

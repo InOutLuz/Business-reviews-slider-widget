@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Dope Studio Business Reviews Slider
  * Description: Fetch and display Google and Trustpilot reviews with a customizable slider widget.
- * Version: 1.0.14
+ * Version: 1.0.15
  * Author: Dope Studio
  * Author URI: https://profiles.wordpress.org/dopestudio
  * Update URI: https://products.dopestudio.co.uk/brs/
@@ -18,7 +18,7 @@ if (! defined('ABSPATH')) {
 class DSBRS_Business_Reviews_Slider_Widget
 {
     private const PLUGIN_SLUG = 'dope-studio-business-reviews-slider';
-    private const PLUGIN_VERSION = '1.0.14';
+    private const PLUGIN_VERSION = '1.0.15';
     private const UPDATE_METADATA_URL = 'https://products.dopestudio.co.uk/brs/downloads/dope-studio-business-reviews-slider-update.json';
     private const UPDATE_CACHE_TRANSIENT = 'dsbrs_update_metadata_cache';
     private const UPDATE_CACHE_TTL = 6 * HOUR_IN_SECONDS;
@@ -2026,18 +2026,53 @@ JS;
 
     private function review_dedupe_key(array $review): string
     {
-        $url = trim((string) ($review['url'] ?? ''));
-        if ($url !== '') {
-            return 'url:' . $url;
-        }
-
         $author = mb_strtolower(trim((string) ($review['author'] ?? '')));
         $date = trim((string) ($review['date'] ?? ''));
         $rating = number_format((float) ($review['rating'] ?? 0), 2, '.', '');
         $headline = mb_strtolower(trim((string) ($review['headline'] ?? '')));
         $text = mb_strtolower(trim((string) ($review['text'] ?? '')));
+        $url = $this->normalise_review_identity_url((string) ($review['url'] ?? ''));
 
-        return 'hash:' . md5($author . '|' . $date . '|' . $rating . '|' . $headline . '|' . $text);
+        if ($author !== '' || $date !== '' || $text !== '' || $headline !== '' || $rating !== '0.00') {
+            return 'hash:' . md5($author . '|' . $date . '|' . $rating . '|' . $headline . '|' . $text);
+        }
+
+        if ($url !== '') {
+            return 'url:' . $url;
+        }
+
+        return 'raw:' . md5(wp_json_encode($review));
+    }
+
+    private function normalise_review_identity_url(string $url): string
+    {
+        $url = trim($url);
+        if ($url === '') {
+            return '';
+        }
+
+        $parts = wp_parse_url($url);
+        if (! is_array($parts)) {
+            return $url;
+        }
+
+        $scheme = isset($parts['scheme']) ? strtolower((string) $parts['scheme']) . '://' : '';
+        $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
+        $path = isset($parts['path']) ? (string) $parts['path'] : '';
+        $query = [];
+
+        if (isset($parts['query'])) {
+            parse_str((string) $parts['query'], $query);
+            unset($query['hl'], $query['gl']);
+            ksort($query);
+        }
+
+        $normalised = $scheme . $host . $path;
+        if (! empty($query)) {
+            $normalised .= '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        }
+
+        return $normalised;
     }
 
     private function first_mixed_by_keys(array $source, array $keys)

@@ -24,6 +24,9 @@
   const copyShortcodeBtn = document.getElementById('grs-copy-shortcode');
   const copyShortcodeText = document.getElementById('grs-shortcode-text');
   const copyStatus = document.getElementById('grs-copy-status');
+  const dataStatusCount = document.getElementById('grs-data-status-count');
+  const dataStatusGoogle = document.getElementById('grs-data-status-google');
+  const dataStatusUpdated = document.getElementById('grs-data-status-updated');
 
   const applyClassicVisibility = () => {
     if (!settingsFormClassic) {
@@ -339,6 +342,15 @@
 
       setStatus(step2FetchStatus, payload?.data?.message || 'Reviews fetched successfully.');
       setStatusState(step2FetchStatus, 'success');
+      if (typeof payload?.data?.stored_count === 'number' && dataStatusCount) {
+        dataStatusCount.textContent = String(payload.data.stored_count);
+      }
+      if (typeof payload?.data?.stored_count === 'number' && dataStatusGoogle) {
+        dataStatusGoogle.textContent = `Google: ${payload.data.stored_count}`;
+      }
+      if (payload?.data?.updated_at_text && dataStatusUpdated) {
+        dataStatusUpdated.textContent = payload.data.updated_at_text;
+      }
       stepTwoFetchSucceeded = true;
       showFetchActionState(false);
       nextIsFetching = false;

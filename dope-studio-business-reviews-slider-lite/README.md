@@ -4,7 +4,7 @@ Tags: reviews, google reviews, slider, widget, google
 Requires at least: 6.0
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.16
+Stable tag: 1.0.17
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -272,6 +272,10 @@ In your own WordPress database. The plugin caches fetched reviews locally so the
 ---
 
 == Changelog ==
+
+= 1.0.17 =
+* Fixed the Lite setup wizard so the right-side data status updates immediately after reviews are fetched.
+* Improved Google review deduplication to avoid duplicates caused by locale-only review URL differences.
 
 = 1.0.16 =
 * Added a Skip wizard option for fresh installs.
